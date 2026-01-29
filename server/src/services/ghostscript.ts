@@ -207,80 +207,39 @@ export async function compressPdf(
 }
 
 /**
- * Compress a PDF to approximately target size
- * Uses binary search to find optimal quality level
+ * Compress a PDF to approximately target size.
+ * Uses a single compression pass at the calculated quality level.
+ * The quality should be pre-calculated using findBestQuality() from sampler.ts
  */
 export async function compressToTargetSize(
   inputPath: string,
   outputPath: string,
   targetSizeBytes: number,
-  minQuality: number = 25,
-  maxQuality: number = 100,
+  quality: number = 50,
   onProgress?: (percent: number, message: string) => void
 ): Promise<CompressionResult & { quality: number }> {
-  const tempDir = path.dirname(outputPath);
-  let bestResult: CompressionResult | null = null;
-  let bestQuality = minQuality;
+  onProgress?.(10, `Compressing at quality ${quality}%...`);
 
-  // Binary search for optimal quality
-  let low = minQuality;
-  let high = maxQuality;
-  let iterations = 0;
-  const maxIterations = 5; // Limit iterations for performance
+  // Single compression pass at the calculated quality
+  const result = await compressPdf(inputPath, outputPath, quality);
 
-  while (low <= high && iterations < maxIterations) {
-    const mid = Math.floor((low + high) / 2);
-    const tempOutput = path.join(tempDir, `temp_${mid}_${Date.now()}.pdf`);
+  onProgress?.(90, 'Finalizing...');
 
-    onProgress?.(
-      Math.round((iterations / maxIterations) * 80),
-      `Testing quality ${mid}%...`
+  // Check if we hit the target
+  const hitTarget = result.compressedSize <= targetSizeBytes;
+
+  if (!hitTarget) {
+    console.log(
+      `Compression result (${(result.compressedSize / 1024 / 1024).toFixed(2)}MB) ` +
+      `exceeded target (${(targetSizeBytes / 1024 / 1024).toFixed(2)}MB). ` +
+      `Verification gate will handle this in Issue #4.`
     );
-
-    try {
-      const result = await compressPdf(inputPath, tempOutput, mid);
-
-      if (result.compressedSize <= targetSizeBytes) {
-        // This quality works, try higher quality
-        if (!bestResult || result.compressedSize > bestResult.compressedSize) {
-          // Clean up previous best
-          if (bestResult && bestResult.outputPath !== outputPath) {
-            try { await fs.unlink(bestResult.outputPath); } catch {}
-          }
-          bestResult = result;
-          bestQuality = mid;
-        }
-        low = mid + 1;
-      } else {
-        // Too big, try lower quality
-        high = mid - 1;
-        // Clean up this attempt
-        try { await fs.unlink(tempOutput); } catch {}
-      }
-    } catch (err) {
-      // Clean up on error
-      try { await fs.unlink(tempOutput); } catch {}
-      throw err;
-    }
-
-    iterations++;
-  }
-
-  // If no result met target, use lowest quality
-  if (!bestResult) {
-    onProgress?.(90, `Compressing at minimum quality ${minQuality}%...`);
-    bestResult = await compressPdf(inputPath, outputPath, minQuality);
-    bestQuality = minQuality;
-  } else if (bestResult.outputPath !== outputPath) {
-    // Move best result to final output path
-    await fs.rename(bestResult.outputPath, outputPath);
-    bestResult.outputPath = outputPath;
   }
 
   onProgress?.(100, 'Compression complete');
 
   return {
-    ...bestResult,
-    quality: bestQuality,
+    ...result,
+    quality,
   };
 }

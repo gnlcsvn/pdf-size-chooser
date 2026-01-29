@@ -1,7 +1,7 @@
 import Bull from 'bull';
 import { v4 as uuidv4 } from 'uuid';
 import { compressPdf, compressToTargetSize } from './ghostscript.js';
-import { estimateSizes, EstimationResult } from './sampler.js';
+import { estimateSizes, EstimationResult, findBestQuality } from './sampler.js';
 import { getJobPath, cleanupJob, ensureTempDir } from '../utils/tempFiles.js';
 import { PDFAnalysis } from './analyzer.js';
 
@@ -69,15 +69,22 @@ export function initJobQueue(): void {
 
       try {
         let result;
+        let finalQuality = quality || 75;
 
         if (targetSizeBytes) {
-          // Compress to target size
+          // Calculate optimal quality from estimates
+          if (job.estimates?.estimates) {
+            const bestQuality = findBestQuality(job.estimates.estimates, targetSizeBytes);
+            finalQuality = bestQuality.quality;
+            console.log(`Target: ${(targetSizeBytes / 1024 / 1024).toFixed(2)}MB, using quality ${finalQuality}%`);
+          }
+
+          // Single-pass compression at calculated quality
           result = await compressToTargetSize(
             job.uploadPath,
             outputPath,
             targetSizeBytes,
-            25,
-            quality || 100,
+            finalQuality,
             (progress, message) => {
               updateJob(jobId, { progress, progressMessage: message });
               bullJob.progress(progress);
@@ -85,7 +92,7 @@ export function initJobQueue(): void {
           );
         } else {
           // Compress at specific quality
-          result = await compressPdf(job.uploadPath, outputPath, quality);
+          result = await compressPdf(job.uploadPath, outputPath, finalQuality);
         }
 
         updateJob(jobId, {
@@ -94,7 +101,7 @@ export function initJobQueue(): void {
           compressionResult: {
             outputPath: result.outputPath,
             compressedSize: result.compressedSize,
-            quality: 'quality' in result ? result.quality : quality,
+            quality: 'quality' in result ? result.quality : finalQuality,
           },
         });
 
@@ -234,20 +241,28 @@ export async function queueCompression(
 
     try {
       let result;
+      let finalQuality = options.quality || 75;
 
       if (options.targetSizeBytes) {
+        // Calculate optimal quality from estimates
+        if (job.estimates?.estimates) {
+          const bestQuality = findBestQuality(job.estimates.estimates, options.targetSizeBytes);
+          finalQuality = bestQuality.quality;
+          console.log(`Target: ${(options.targetSizeBytes / 1024 / 1024).toFixed(2)}MB, using quality ${finalQuality}%`);
+        }
+
+        // Single-pass compression at calculated quality
         result = await compressToTargetSize(
           job.uploadPath,
           outputPath,
           options.targetSizeBytes,
-          25,
-          options.quality || 100,
+          finalQuality,
           (progress, message) => {
             updateJob(jobId, { progress, progressMessage: message });
           }
         );
       } else {
-        result = await compressPdf(job.uploadPath, outputPath, options.quality || 75);
+        result = await compressPdf(job.uploadPath, outputPath, finalQuality);
       }
 
       updateJob(jobId, {
@@ -256,7 +271,7 @@ export async function queueCompression(
         compressionResult: {
           outputPath: result.outputPath,
           compressedSize: result.compressedSize,
-          quality: 'quality' in result ? (result as { quality: number }).quality : (options.quality || 75),
+          quality: 'quality' in result ? (result as { quality: number }).quality : finalQuality,
         },
       });
     } catch (err) {

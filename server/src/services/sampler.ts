@@ -158,31 +158,79 @@ export async function estimateSizes(
 }
 
 /**
- * Find the best quality level to achieve target size based on estimates
+ * Find the best quality level to achieve target size based on estimates.
+ * Uses linear interpolation between sample points for more precise targeting.
  */
 export function findBestQuality(
   estimates: SizeEstimate[],
   targetSizeBytes: number
 ): { quality: number; estimatedSize: number; achievable: boolean } {
-  // Sort by quality descending (prefer higher quality)
+  if (estimates.length === 0) {
+    return { quality: 50, estimatedSize: 0, achievable: false };
+  }
+
+  // Sort by quality descending (100, 75, 50, 25)
   const sorted = [...estimates].sort((a, b) => b.quality - a.quality);
 
-  // Find highest quality that meets target
-  for (const estimate of sorted) {
-    if (estimate.estimatedSize <= targetSizeBytes) {
+  // If target is larger than highest quality estimate, use highest quality
+  if (targetSizeBytes >= sorted[0].estimatedSize) {
+    return {
+      quality: sorted[0].quality,
+      estimatedSize: sorted[0].estimatedSize,
+      achievable: true,
+    };
+  }
+
+  // If target is smaller than lowest quality estimate, not achievable
+  const lowest = sorted[sorted.length - 1];
+  if (targetSizeBytes < lowest.estimatedSize) {
+    return {
+      quality: lowest.quality,
+      estimatedSize: lowest.estimatedSize,
+      achievable: false,
+    };
+  }
+
+  // Find the two quality levels that bracket our target and interpolate
+  for (let i = 0; i < sorted.length - 1; i++) {
+    const higher = sorted[i];     // Higher quality, larger size
+    const lower = sorted[i + 1];  // Lower quality, smaller size
+
+    if (targetSizeBytes <= higher.estimatedSize && targetSizeBytes >= lower.estimatedSize) {
+      // Linear interpolation between the two quality levels
+      const sizeRange = higher.estimatedSize - lower.estimatedSize;
+      const qualityRange = higher.quality - lower.quality;
+
+      if (sizeRange === 0) {
+        // Same size at both qualities, use lower quality
+        return {
+          quality: lower.quality,
+          estimatedSize: lower.estimatedSize,
+          achievable: true,
+        };
+      }
+
+      // How far between lower and higher size is our target? (0 = at lower, 1 = at higher)
+      const sizeRatio = (targetSizeBytes - lower.estimatedSize) / sizeRange;
+
+      // Interpolate quality (higher ratio = higher quality)
+      const interpolatedQuality = Math.round(lower.quality + (sizeRatio * qualityRange));
+
+      // Estimate the size at this interpolated quality
+      const estimatedSize = Math.round(lower.estimatedSize + (sizeRatio * sizeRange));
+
       return {
-        quality: estimate.quality,
-        estimatedSize: estimate.estimatedSize,
+        quality: Math.max(1, Math.min(100, interpolatedQuality)),
+        estimatedSize,
         achievable: true,
       };
     }
   }
 
-  // If no quality level achieves target, return lowest quality
-  const lowestQuality = sorted[sorted.length - 1];
+  // Fallback: use lowest quality
   return {
-    quality: lowestQuality?.quality || 25,
-    estimatedSize: lowestQuality?.estimatedSize || 0,
+    quality: lowest.quality,
+    estimatedSize: lowest.estimatedSize,
     achievable: false,
   };
 }
