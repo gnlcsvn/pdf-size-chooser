@@ -2,6 +2,7 @@ import path from 'path';
 import { promises as fs } from 'fs';
 import { getPageCount, extractPages, compressPdf } from './ghostscript.js';
 import { getTempDir } from '../utils/tempFiles.js';
+import { analyzePdf, PDFAnalysis } from './analyzer.js';
 
 export interface SizeEstimate {
   quality: number;
@@ -16,6 +17,8 @@ export interface EstimationResult {
   pageCount: number;
   estimates: SizeEstimate[];
   samplingTimeMs: number;
+  // New analysis data
+  analysis?: PDFAnalysis;
 }
 
 const QUALITY_LEVELS = [100, 75, 50, 25];
@@ -40,19 +43,31 @@ function selectRandomPages(totalPages: number, sampleCount: number): number[] {
 }
 
 /**
- * Perform 10% page sampling and estimate compression sizes at different quality levels
+ * Perform PDF analysis and sample compression to estimate sizes at different quality levels
  */
 export async function estimateSizes(
   inputPath: string,
-  jobId: string
+  jobId: string,
+  onProgress?: (message: string) => void
 ): Promise<EstimationResult> {
   const startTime = Date.now();
   const tempDir = getTempDir();
   const originalStats = await fs.stat(inputPath);
   const originalSize = originalStats.size;
 
-  // Get page count
-  const pageCount = await getPageCount(inputPath);
+  // Run PDF analysis first
+  onProgress?.('Analyzing PDF structure...');
+  let analysis: PDFAnalysis | undefined;
+  try {
+    analysis = await analyzePdf(inputPath);
+    onProgress?.(`Found ${analysis.images.count} images, ${analysis.fonts.count} fonts`);
+  } catch (err) {
+    console.error('PDF analysis failed, continuing with basic estimation:', err);
+  }
+
+  // Get page count (use analysis result if available)
+  const pageCount = analysis?.pageCount ?? await getPageCount(inputPath);
+  onProgress?.(`Scanning ${pageCount} pages...`);
 
   // Calculate sample size (10% of pages, min 1, max 10)
   let sampleCount = Math.floor(pageCount * SAMPLE_PERCENTAGE);
@@ -83,10 +98,13 @@ export async function estimateSizes(
   const sampleOriginalSize = sampleStats.size;
 
   // Compress sample at each quality level and extrapolate using compression ratio
-  for (const quality of QUALITY_LEVELS) {
+  onProgress?.('Calculating compression options...');
+  for (let i = 0; i < QUALITY_LEVELS.length; i++) {
+    const quality = QUALITY_LEVELS[i];
     const compressedSamplePath = path.join(tempDir, `${jobId}_sample_q${quality}.pdf`);
 
     try {
+      onProgress?.(`Testing quality level ${i + 1}/${QUALITY_LEVELS.length}...`);
       const result = await compressPdf(samplePath, compressedSamplePath, quality);
 
       // Calculate compression ratio from the sample
@@ -135,6 +153,7 @@ export async function estimateSizes(
     pageCount,
     estimates,
     samplingTimeMs,
+    analysis,
   };
 }
 

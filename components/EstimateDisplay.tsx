@@ -1,6 +1,6 @@
 'use client';
 
-import { SizeEstimate } from '@/lib/api';
+import { SizeEstimate, PDFAnalysis } from '@/lib/api';
 
 type CompressionChoice =
   | { type: 'quality'; quality: number }
@@ -10,6 +10,7 @@ interface EstimateDisplayProps {
   estimates: SizeEstimate[];
   originalSizeMB: number;
   pageCount: number;
+  analysis?: PDFAnalysis;
   selectedChoice: CompressionChoice | null;
   onChoiceSelect: (choice: CompressionChoice) => void;
 }
@@ -50,6 +51,7 @@ export default function EstimateDisplay({
   estimates,
   originalSizeMB,
   pageCount,
+  analysis,
   selectedChoice,
   onChoiceSelect,
 }: EstimateDisplayProps) {
@@ -69,11 +71,43 @@ export default function EstimateDisplay({
 
   return (
     <div className="space-y-6">
-      <div className="text-center pb-2">
-        <p className="text-gray-600">
-          Your PDF has <span className="font-semibold">{pageCount} pages</span> and is currently{' '}
-          <span className="font-semibold">{formatSize(originalSizeMB)}</span>
-        </p>
+      {/* PDF Analysis Summary */}
+      <div className="bg-gray-50 rounded-lg p-4 space-y-3">
+        <div className="text-center">
+          <p className="text-gray-600">
+            Your PDF has <span className="font-semibold">{pageCount} pages</span> and is currently{' '}
+            <span className="font-semibold">{formatSize(originalSizeMB)}</span>
+          </p>
+        </div>
+
+        {/* Component breakdown - only show if analysis is available */}
+        {analysis && (
+          <div className="flex flex-wrap justify-center gap-x-4 gap-y-1 text-sm text-gray-500 pt-2 border-t border-gray-200">
+            {analysis.images.count > 0 && (
+              <span>
+                {analysis.images.count} image{analysis.images.count !== 1 ? 's' : ''}{' '}
+                <span className="text-gray-400">({formatSize(analysis.images.totalSizeMB)})</span>
+              </span>
+            )}
+            {analysis.fonts.count > 0 && (
+              <span>
+                {analysis.fonts.count} font{analysis.fonts.count !== 1 ? 's' : ''}
+              </span>
+            )}
+            {analysis.compressibleContentMB > 0 && (
+              <span className="text-green-600">
+                {formatSize(analysis.compressibleContentMB)} compressible
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* Minimum achievable size hint */}
+        {analysis && analysis.minimumAchievableSizeMB > 0 && (
+          <p className="text-xs text-gray-400 text-center">
+            Minimum achievable: ~{formatSize(analysis.minimumAchievableSizeMB)}
+          </p>
+        )}
       </div>
 
       {/* Use Case Options */}

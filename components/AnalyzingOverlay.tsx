@@ -2,9 +2,10 @@
 
 interface AnalyzingOverlayProps {
   filename: string;
+  progressMessage?: string;
 }
 
-export default function AnalyzingOverlay({ filename }: AnalyzingOverlayProps) {
+export default function AnalyzingOverlay({ filename, progressMessage }: AnalyzingOverlayProps) {
   return (
     <div className="fixed inset-0 bg-white/90 backdrop-blur-sm z-50 flex items-center justify-center">
       <div className="text-center space-y-6 max-w-sm mx-auto px-4">
@@ -23,10 +24,20 @@ export default function AnalyzingOverlay({ filename }: AnalyzingOverlayProps) {
           </p>
         </div>
 
-        <p className="text-gray-400 text-sm">
-          Sampling pages to estimate compression sizes.<br />
-          Hang tight - this helps us find the best result for you.
-        </p>
+        <div className="space-y-2">
+          {progressMessage ? (
+            <p className="text-blue-600 text-sm font-medium animate-pulse">
+              {progressMessage}
+            </p>
+          ) : (
+            <p className="text-gray-400 text-sm">
+              Starting analysis...
+            </p>
+          )}
+          <p className="text-gray-400 text-xs">
+            This helps us find the best compression for your file.
+          </p>
+        </div>
       </div>
     </div>
   );

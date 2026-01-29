@@ -44,6 +44,7 @@ export default function Home() {
   } | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
   const [backendConnected, setBackendConnected] = useState<boolean | null>(null);
+  const [progressMessage, setProgressMessage] = useState<string | null>(null);
 
   // Refs to track active polling and prevent race conditions
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -136,6 +137,11 @@ export default function Home() {
               return;
             }
 
+            // Update progress message if available
+            if (jobStatus.progressMessage) {
+              setProgressMessage(jobStatus.progressMessage);
+            }
+
             if (jobStatus.status === 'ready' || jobStatus.status === 'done') {
               // Final check - if job was cancelled, don't update state
               if (activeJobIdRef.current !== currentJobId) {
@@ -143,6 +149,7 @@ export default function Home() {
               }
 
               cleanupPolling();
+              setProgressMessage(null);
 
               try {
                 const estimateData = await getEstimates(currentJobId);
@@ -247,6 +254,7 @@ export default function Home() {
     setEstimates(null);
     setCompressionResult(null);
     setSelectedChoice(null);
+    setProgressMessage(null);
     setStatus('idle');
   }, [cancelCurrentJob]);
 
@@ -257,7 +265,7 @@ export default function Home() {
     <div className="min-h-screen bg-gray-50">
       {/* Analyzing Overlay */}
       {isAnalyzing && file && (
-        <AnalyzingOverlay filename={file.name} />
+        <AnalyzingOverlay filename={file.name} progressMessage={progressMessage || undefined} />
       )}
 
       {/* Compressing Overlay */}
@@ -361,6 +369,7 @@ export default function Home() {
                 estimates={estimates.estimates}
                 originalSizeMB={estimates.originalSizeMB}
                 pageCount={estimates.pageCount}
+                analysis={estimates.analysis}
                 selectedChoice={selectedChoice}
                 onChoiceSelect={setSelectedChoice}
               />

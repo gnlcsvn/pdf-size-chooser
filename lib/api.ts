@@ -51,6 +51,27 @@ export interface SizeEstimate {
   estimatedSizeMB: number;
 }
 
+export interface PDFAnalysis {
+  images: {
+    count: number;
+    totalSizeMB: number;
+  };
+  fonts: {
+    count: number;
+    embeddedCount: number;
+  };
+  metadata: {
+    title: string | null;
+    hasBookmarks: boolean;
+    hasAnnotations: boolean;
+    hasForms: boolean;
+  };
+  compressibleContentMB: number;
+  fixedOverheadMB: number;
+  minimumAchievableSizeMB: number;
+  analysisTimeMs: number;
+}
+
 export interface EstimateResponse {
   status: string;
   originalSize: number;
@@ -59,6 +80,7 @@ export interface EstimateResponse {
   sampledPages: number;
   samplingTimeMs: number;
   estimates: SizeEstimate[];
+  analysis?: PDFAnalysis;
   message?: string;
 }
 
