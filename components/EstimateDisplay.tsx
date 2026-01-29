@@ -1,6 +1,7 @@
 'use client';
 
 import { SizeEstimate, PDFAnalysis } from '@/lib/api';
+import TargetSelector, { TargetSelection } from './TargetSelector';
 
 type CompressionChoice =
   | { type: 'quality'; quality: number }
@@ -21,12 +22,6 @@ function formatSize(mb: number): string {
   }
   return `${(mb * 1024).toFixed(0)} KB`;
 }
-
-const useCaseOptions = [
-  { targetMB: 25, label: 'Email attachment', description: 'Under 25 MB - fits most email limits' },
-  { targetMB: 10, label: 'Easy sharing', description: 'Under 10 MB - quick uploads & downloads' },
-  { targetMB: 5, label: 'Minimal size', description: 'Under 5 MB - for slow connections' },
-];
 
 const qualityDescriptions: Record<number, { label: string; description: string }> = {
   100: {
@@ -58,16 +53,54 @@ export default function EstimateDisplay({
   // Sort estimates by quality descending
   const sortedEstimates = [...estimates].sort((a, b) => b.quality - a.quality);
 
-  // Find smallest achievable size
-  const smallestEstimate = sortedEstimates[sortedEstimates.length - 1];
+  // Convert TargetSelection to CompressionChoice
+  const handleTargetSelect = (target: TargetSelection) => {
+    const label = target.type === 'platform'
+      ? target.platformName
+      : `${target.targetMB} MB`;
+    onChoiceSelect({
+      type: 'target',
+      targetMB: target.targetMB,
+      label,
+    });
+  };
 
-  // Filter use cases that are achievable
-  const achievableUseCases = useCaseOptions.filter(
-    (uc) => smallestEstimate && smallestEstimate.estimatedSizeMB <= uc.targetMB
-  );
+  // Convert CompressionChoice back to TargetSelection for the selector
+  const getSelectedTarget = (): TargetSelection | null => {
+    if (!selectedChoice || selectedChoice.type !== 'target') return null;
 
-  // Check if any use case is relevant (file is bigger than smallest target)
-  const showUseCases = originalSizeMB > 5;
+    // Try to find matching platform
+    const platforms = [
+      { id: 'gmail', name: 'Gmail', limitMB: 25 },
+      { id: 'outlook', name: 'Outlook', limitMB: 20 },
+      { id: 'yahoo', name: 'Yahoo', limitMB: 25 },
+      { id: 'icloud', name: 'iCloud', limitMB: 20 },
+      { id: 'protonmail', name: 'ProtonMail', limitMB: 25 },
+      { id: 'slack', name: 'Slack', limitMB: 25 },
+      { id: 'discord', name: 'Discord', limitMB: 25 },
+      { id: 'whatsapp', name: 'WhatsApp', limitMB: 100 },
+      { id: 'messenger', name: 'Messenger', limitMB: 25 },
+      { id: 'linkedin', name: 'LinkedIn', limitMB: 20 },
+    ];
+
+    const matchedPlatform = platforms.find(
+      p => p.name === selectedChoice.label && p.limitMB === selectedChoice.targetMB
+    );
+
+    if (matchedPlatform) {
+      return {
+        type: 'platform',
+        platformId: matchedPlatform.id,
+        platformName: matchedPlatform.name,
+        targetMB: matchedPlatform.limitMB,
+      };
+    }
+
+    return {
+      type: 'custom',
+      targetMB: selectedChoice.targetMB,
+    };
+  };
 
   return (
     <div className="space-y-6">
@@ -110,98 +143,26 @@ export default function EstimateDisplay({
         )}
       </div>
 
-      {/* Use Case Options */}
-      {showUseCases && achievableUseCases.length > 0 && (
-        <div className="space-y-2">
-          <p className="text-sm font-medium text-gray-700">
-            I need this file to...
-          </p>
-          <div className="grid gap-2">
-            {achievableUseCases.map((useCase) => {
-              const isSelected =
-                selectedChoice?.type === 'target' &&
-                selectedChoice.targetMB === useCase.targetMB;
-
-              // Find estimated size for this target
-              const estimateForTarget = sortedEstimates.find(
-                (e) => e.estimatedSizeMB <= useCase.targetMB
-              );
-
-              return (
-                <button
-                  key={useCase.targetMB}
-                  onClick={() => onChoiceSelect({
-                    type: 'target',
-                    targetMB: useCase.targetMB,
-                    label: useCase.label
-                  })}
-                  className={`
-                    w-full p-4 rounded-lg border-2 transition-all text-left
-                    ${isSelected
-                      ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-200'
-                      : 'border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50'
-                    }
-                  `}
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <div
-                        className={`
-                          w-5 h-5 rounded-full border-2 flex items-center justify-center
-                          ${isSelected ? 'border-blue-500 bg-blue-500' : 'border-gray-300'}
-                        `}
-                      >
-                        {isSelected && (
-                          <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
-                            <path
-                              fillRule="evenodd"
-                              d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                              clipRule="evenodd"
-                            />
-                          </svg>
-                        )}
-                      </div>
-                      <div>
-                        <p className={`font-medium ${isSelected ? 'text-blue-700' : 'text-gray-800'}`}>
-                          {useCase.label}
-                        </p>
-                        <p className="text-sm text-gray-500">{useCase.description}</p>
-                      </div>
-                    </div>
-                    {estimateForTarget && (
-                      <div className="text-right">
-                        <p className={`font-semibold ${isSelected ? 'text-blue-700' : 'text-gray-800'}`}>
-                          ~{formatSize(estimateForTarget.estimatedSizeMB)}
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
+      {/* Target Selection - Platform Presets */}
+      <TargetSelector
+        originalSizeMB={originalSizeMB}
+        minimumAchievableMB={analysis?.minimumAchievableSizeMB}
+        selectedTarget={getSelectedTarget()}
+        onTargetSelect={handleTargetSelect}
+      />
 
       {/* Divider */}
-      {showUseCases && achievableUseCases.length > 0 && (
-        <div className="relative">
-          <div className="absolute inset-0 flex items-center">
-            <div className="w-full border-t border-gray-200"></div>
-          </div>
-          <div className="relative flex justify-center text-sm">
-            <span className="px-3 bg-white text-gray-500">or choose by quality</span>
-          </div>
+      <div className="relative">
+        <div className="absolute inset-0 flex items-center">
+          <div className="w-full border-t border-gray-200"></div>
         </div>
-      )}
+        <div className="relative flex justify-center text-sm">
+          <span className="px-3 bg-white text-gray-500">or choose by quality</span>
+        </div>
+      </div>
 
       {/* Quality Options */}
       <div className="space-y-2">
-        {!showUseCases && (
-          <p className="text-sm font-medium text-gray-700">
-            Choose compression level:
-          </p>
-        )}
         <div className="grid gap-2">
           {sortedEstimates.map((estimate) => {
             const isSelected =
@@ -264,7 +225,7 @@ export default function EstimateDisplay({
       </div>
 
       <p className="text-xs text-gray-400 text-center">
-        Heavy compression works best for text documents. PDFs with large images may show reduced image clarity.
+        Text remains sharp at all levels. Heavy compression affects image quality.
       </p>
     </div>
   );
