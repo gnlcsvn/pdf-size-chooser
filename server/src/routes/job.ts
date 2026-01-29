@@ -30,6 +30,12 @@ jobRouter.get('/:id/status', async (req, res) => {
           compressedSize: job.compressionResult.compressedSize,
           quality: job.compressionResult.quality,
           compressionRatio: job.compressionResult.compressedSize / job.originalSize,
+          // Verification gate results
+          verificationPassed: job.compressionResult.verificationPassed,
+          attempts: job.compressionResult.attempts,
+          targetMet: job.compressionResult.targetSizeBytes
+            ? job.compressionResult.compressedSize <= job.compressionResult.targetSizeBytes
+            : undefined,
         }
       : undefined,
     createdAt: job.createdAt,
