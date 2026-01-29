@@ -74,6 +74,31 @@ jobRouter.get('/:id/estimate', async (req, res) => {
     estimatedSizeMB: Number((e.estimatedSize / (1024 * 1024)).toFixed(2)),
   }));
 
+  // Include analysis data if available
+  const analysis = job.estimates.analysis;
+  const analysisResponse = analysis
+    ? {
+        images: {
+          count: analysis.images.count,
+          totalSizeMB: Number((analysis.images.totalEstimatedSize / (1024 * 1024)).toFixed(2)),
+        },
+        fonts: {
+          count: analysis.fonts.count,
+          embeddedCount: analysis.fonts.embeddedCount,
+        },
+        metadata: {
+          title: analysis.metadata.title,
+          hasBookmarks: analysis.metadata.hasBookmarks,
+          hasAnnotations: analysis.metadata.hasAnnotations,
+          hasForms: analysis.metadata.hasForms,
+        },
+        compressibleContentMB: Number((analysis.compressibleContent / (1024 * 1024)).toFixed(2)),
+        fixedOverheadMB: Number((analysis.fixedOverhead / (1024 * 1024)).toFixed(2)),
+        minimumAchievableSizeMB: Number((analysis.minimumAchievableSize / (1024 * 1024)).toFixed(2)),
+        analysisTimeMs: analysis.analysisTimeMs,
+      }
+    : undefined;
+
   res.json({
     status: job.status,
     originalSize: job.originalSize,
@@ -82,6 +107,7 @@ jobRouter.get('/:id/estimate', async (req, res) => {
     sampledPages: job.estimates.estimates[0]?.samplePages || 0,
     samplingTimeMs: job.estimates.samplingTimeMs,
     estimates: formattedEstimates,
+    analysis: analysisResponse,
   });
 });
 

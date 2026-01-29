@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { compressPdf, compressToTargetSize } from './ghostscript.js';
 import { estimateSizes, EstimationResult } from './sampler.js';
 import { getJobPath, cleanupJob, ensureTempDir } from '../utils/tempFiles.js';
+import { PDFAnalysis } from './analyzer.js';
 
 export interface Job {
   id: string;
@@ -180,13 +181,18 @@ async function startEstimation(jobId: string): Promise<void> {
   const job = jobs.get(jobId);
   if (!job) return;
 
-  updateJob(jobId, { status: 'estimating' });
+  updateJob(jobId, { status: 'estimating', progress: 0 });
 
   try {
-    const estimates = await estimateSizes(job.uploadPath, jobId);
+    const estimates = await estimateSizes(job.uploadPath, jobId, (message) => {
+      // Update progress message during estimation
+      updateJob(jobId, { progressMessage: message });
+    });
     updateJob(jobId, {
       status: 'ready',
       estimates,
+      progress: 100,
+      progressMessage: 'Analysis complete',
     });
   } catch (err) {
     console.error(`Estimation failed for job ${jobId}:`, err);
