@@ -7,11 +7,8 @@ interface FeasibilityResultProps {
   targetLabel: string;
   estimatedMB: number;
   minimumAchievableMB?: number;
-  originalSizeMB: number;
-  pageCount: number;
   onCompress: () => void;
   onChangeTarget: (newTargetMB?: number) => void;
-  onSplit?: (pageNumber?: number) => void; // Optional until Issue #6
 }
 
 function formatSize(mb: number): string {
@@ -21,18 +18,15 @@ function formatSize(mb: number): string {
   return `${(mb * 1024).toFixed(0)} KB`;
 }
 
-type ImpossibleTargetOption = 'split' | 'compress' | 'different';
+type ImpossibleTargetOption = 'compress' | 'different';
 
 export default function FeasibilityResult({
   targetMB,
   targetLabel,
   estimatedMB,
   minimumAchievableMB,
-  originalSizeMB,
-  pageCount,
   onCompress,
   onChangeTarget,
-  onSplit,
 }: FeasibilityResultProps) {
   const [selectedOption, setSelectedOption] = useState<ImpossibleTargetOption>('different');
   const [customTargetMB, setCustomTargetMB] = useState<string>(
@@ -45,10 +39,7 @@ export default function FeasibilityResult({
   const isClose = isAchievable && estimatedMB >= targetMB * 0.95;
   const isMuchSmaller = isAchievable && estimatedMB <= targetMB * 0.7;
 
-  // Calculate split information
   const minSize = minimumAchievableMB || estimatedMB;
-  const partsNeeded = Math.ceil(minSize / targetMB);
-  const avgPartSize = originalSizeMB / partsNeeded;
 
   // Validate custom target
   const handleCustomTargetChange = (value: string) => {
@@ -73,16 +64,13 @@ export default function FeasibilityResult({
       } else {
         onChangeTarget();
       }
-    } else if (selectedOption === 'split' && onSplit) {
-      onSplit();
     }
   };
 
   const isContinueDisabled =
-    selectedOption === 'split' && !onSplit || // Split not implemented yet
-    (selectedOption === 'different' && (!!customTargetError || !customTargetMB));
+    selectedOption === 'different' && (!!customTargetError || !customTargetMB);
 
-  // For impossible targets - show three options
+  // For impossible targets - show two options
   if (!isAchievable) {
     return (
       <div className="space-y-4">
@@ -109,42 +97,7 @@ export default function FeasibilityResult({
         <div className="space-y-3">
           <p className="text-sm font-medium text-gray-700">How would you like to proceed?</p>
 
-          {/* Option 1: Split (Coming soon) */}
-          <label
-            className={`block p-4 rounded-lg border-2 cursor-pointer transition-all ${
-              selectedOption === 'split'
-                ? 'border-blue-500 bg-blue-50'
-                : 'border-gray-200 hover:border-gray-300'
-            } ${!onSplit ? 'opacity-50 cursor-not-allowed' : ''}`}
-          >
-            <div className="flex items-start gap-3">
-              <input
-                type="radio"
-                name="impossibleOption"
-                checked={selectedOption === 'split'}
-                onChange={() => setSelectedOption('split')}
-                disabled={!onSplit}
-                className="mt-1"
-              />
-              <div className="flex-1">
-                <div className="flex items-center gap-2">
-                  <span className="font-medium text-gray-800">
-                    Split into {partsNeeded} files
-                  </span>
-                  {!onSplit && (
-                    <span className="text-xs bg-gray-200 text-gray-600 px-2 py-0.5 rounded">
-                      Coming soon
-                    </span>
-                  )}
-                </div>
-                <p className="text-sm text-gray-500 mt-1">
-                  Each part will be ~{formatSize(avgPartSize)} ({pageCount} pages ÷ {partsNeeded} parts)
-                </p>
-              </div>
-            </div>
-          </label>
-
-          {/* Option 2: Compress anyway */}
+          {/* Option 1: Compress anyway */}
           <label
             className={`block p-4 rounded-lg border-2 cursor-pointer transition-all ${
               selectedOption === 'compress'
@@ -163,13 +116,13 @@ export default function FeasibilityResult({
               <div className="flex-1">
                 <span className="font-medium text-gray-800">Compress anyway</span>
                 <p className="text-sm text-amber-600 mt-1">
-                  ⚠️ Expect severe quality loss. Images may be unreadable.
+                  Expect severe quality loss. Images may be unreadable.
                 </p>
               </div>
             </div>
           </label>
 
-          {/* Option 3: Try different target */}
+          {/* Option 2: Try different target */}
           <label
             className={`block p-4 rounded-lg border-2 cursor-pointer transition-all ${
               selectedOption === 'different'

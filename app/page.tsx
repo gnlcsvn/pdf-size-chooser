@@ -413,8 +413,6 @@ export default function Home() {
                     || selectedChoice.targetMB
                   }
                   minimumAchievableMB={estimates.analysis?.minimumAchievableSizeMB}
-                  originalSizeMB={estimates.originalSizeMB}
-                  pageCount={estimates.pageCount}
                   onCompress={handleCompress}
                   onChangeTarget={(newTargetMB) => {
                     if (newTargetMB) {
