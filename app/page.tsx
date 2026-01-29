@@ -413,8 +413,22 @@ export default function Home() {
                     || selectedChoice.targetMB
                   }
                   minimumAchievableMB={estimates.analysis?.minimumAchievableSizeMB}
+                  originalSizeMB={estimates.originalSizeMB}
+                  pageCount={estimates.pageCount}
                   onCompress={handleCompress}
-                  onChangeTarget={() => setSelectedChoice(null)}
+                  onChangeTarget={(newTargetMB) => {
+                    if (newTargetMB) {
+                      // User selected a new target from the impossible target screen
+                      setSelectedChoice({
+                        type: 'target',
+                        targetMB: newTargetMB,
+                        label: `${newTargetMB} MB`,
+                      });
+                    } else {
+                      // User wants to go back to selection
+                      setSelectedChoice(null);
+                    }
+                  }}
                 />
               )}
 

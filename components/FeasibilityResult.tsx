@@ -1,12 +1,17 @@
 'use client';
 
+import { useState } from 'react';
+
 interface FeasibilityResultProps {
   targetMB: number;
   targetLabel: string;
   estimatedMB: number;
   minimumAchievableMB?: number;
+  originalSizeMB: number;
+  pageCount: number;
   onCompress: () => void;
-  onChangeTarget: () => void;
+  onChangeTarget: (newTargetMB?: number) => void;
+  onSplit?: (pageNumber?: number) => void; // Optional until Issue #6
 }
 
 function formatSize(mb: number): string {
@@ -16,23 +21,72 @@ function formatSize(mb: number): string {
   return `${(mb * 1024).toFixed(0)} KB`;
 }
 
+type ImpossibleTargetOption = 'split' | 'compress' | 'different';
+
 export default function FeasibilityResult({
   targetMB,
   targetLabel,
   estimatedMB,
   minimumAchievableMB,
+  originalSizeMB,
+  pageCount,
   onCompress,
   onChangeTarget,
+  onSplit,
 }: FeasibilityResultProps) {
+  const [selectedOption, setSelectedOption] = useState<ImpossibleTargetOption>('different');
+  const [customTargetMB, setCustomTargetMB] = useState<string>(
+    minimumAchievableMB ? Math.ceil(minimumAchievableMB).toString() : ''
+  );
+  const [customTargetError, setCustomTargetError] = useState<string | null>(null);
+
   // Determine feasibility
   const isAchievable = estimatedMB <= targetMB;
-  const isClose = isAchievable && estimatedMB >= targetMB * 0.95; // Within 5% of target
-  const isMuchSmaller = isAchievable && estimatedMB <= targetMB * 0.7; // 30%+ smaller than target
+  const isClose = isAchievable && estimatedMB >= targetMB * 0.95;
+  const isMuchSmaller = isAchievable && estimatedMB <= targetMB * 0.7;
 
-  // For impossible targets
+  // Calculate split information
+  const minSize = minimumAchievableMB || estimatedMB;
+  const partsNeeded = Math.ceil(minSize / targetMB);
+  const avgPartSize = originalSizeMB / partsNeeded;
+
+  // Validate custom target
+  const handleCustomTargetChange = (value: string) => {
+    setCustomTargetMB(value);
+    setCustomTargetError(null);
+
+    const numValue = parseFloat(value);
+    if (value && (isNaN(numValue) || numValue <= 0)) {
+      setCustomTargetError('Enter a valid number');
+    } else if (numValue && numValue < (minimumAchievableMB || 0.5)) {
+      setCustomTargetError(`Minimum achievable is ~${formatSize(minimumAchievableMB || 0.5)}`);
+    }
+  };
+
+  const handleContinue = () => {
+    if (selectedOption === 'compress') {
+      onCompress();
+    } else if (selectedOption === 'different') {
+      const numValue = parseFloat(customTargetMB);
+      if (!isNaN(numValue) && numValue > 0) {
+        onChangeTarget(numValue);
+      } else {
+        onChangeTarget();
+      }
+    } else if (selectedOption === 'split' && onSplit) {
+      onSplit();
+    }
+  };
+
+  const isContinueDisabled =
+    selectedOption === 'split' && !onSplit || // Split not implemented yet
+    (selectedOption === 'different' && (!!customTargetError || !customTargetMB));
+
+  // For impossible targets - show three options
   if (!isAchievable) {
     return (
       <div className="space-y-4">
+        {/* Warning banner */}
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
           <div className="flex items-start gap-3">
             <div className="flex-shrink-0 w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center">
@@ -42,37 +96,141 @@ export default function FeasibilityResult({
             </div>
             <div className="flex-1">
               <h3 className="font-semibold text-amber-800">
-                This target is too aggressive
+                Your PDF can't be compressed below ~{formatSize(minSize)}
               </h3>
               <p className="text-sm text-amber-700 mt-1">
-                Your PDF can't be compressed below ~{formatSize(minimumAchievableMB || estimatedMB)} without severe quality loss.
-              </p>
-              <p className="text-sm text-amber-600 mt-2">
-                Best we can achieve: <span className="font-semibold">{formatSize(estimatedMB)}</span>
-                {' '}(target: {formatSize(targetMB)})
+                Target: {formatSize(targetMB)} • Minimum achievable: {formatSize(minSize)}
               </p>
             </div>
           </div>
         </div>
 
-        <div className="flex gap-3">
-          <button
-            onClick={onChangeTarget}
-            className="flex-1 py-3 px-4 rounded-lg font-semibold text-blue-600 bg-blue-50 hover:bg-blue-100 transition-colors"
+        {/* Options */}
+        <div className="space-y-3">
+          <p className="text-sm font-medium text-gray-700">How would you like to proceed?</p>
+
+          {/* Option 1: Split (Coming soon) */}
+          <label
+            className={`block p-4 rounded-lg border-2 cursor-pointer transition-all ${
+              selectedOption === 'split'
+                ? 'border-blue-500 bg-blue-50'
+                : 'border-gray-200 hover:border-gray-300'
+            } ${!onSplit ? 'opacity-50 cursor-not-allowed' : ''}`}
           >
-            Choose different target
-          </button>
-          <button
-            onClick={onCompress}
-            className="flex-1 py-3 px-4 rounded-lg font-semibold text-gray-600 bg-gray-100 hover:bg-gray-200 transition-colors"
+            <div className="flex items-start gap-3">
+              <input
+                type="radio"
+                name="impossibleOption"
+                checked={selectedOption === 'split'}
+                onChange={() => setSelectedOption('split')}
+                disabled={!onSplit}
+                className="mt-1"
+              />
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="font-medium text-gray-800">
+                    Split into {partsNeeded} files
+                  </span>
+                  {!onSplit && (
+                    <span className="text-xs bg-gray-200 text-gray-600 px-2 py-0.5 rounded">
+                      Coming soon
+                    </span>
+                  )}
+                </div>
+                <p className="text-sm text-gray-500 mt-1">
+                  Each part will be ~{formatSize(avgPartSize)} ({pageCount} pages ÷ {partsNeeded} parts)
+                </p>
+              </div>
+            </div>
+          </label>
+
+          {/* Option 2: Compress anyway */}
+          <label
+            className={`block p-4 rounded-lg border-2 cursor-pointer transition-all ${
+              selectedOption === 'compress'
+                ? 'border-blue-500 bg-blue-50'
+                : 'border-gray-200 hover:border-gray-300'
+            }`}
           >
-            Compress anyway
-          </button>
+            <div className="flex items-start gap-3">
+              <input
+                type="radio"
+                name="impossibleOption"
+                checked={selectedOption === 'compress'}
+                onChange={() => setSelectedOption('compress')}
+                className="mt-1"
+              />
+              <div className="flex-1">
+                <span className="font-medium text-gray-800">Compress anyway</span>
+                <p className="text-sm text-amber-600 mt-1">
+                  ⚠️ Expect severe quality loss. Images may be unreadable.
+                </p>
+              </div>
+            </div>
+          </label>
+
+          {/* Option 3: Try different target */}
+          <label
+            className={`block p-4 rounded-lg border-2 cursor-pointer transition-all ${
+              selectedOption === 'different'
+                ? 'border-blue-500 bg-blue-50'
+                : 'border-gray-200 hover:border-gray-300'
+            }`}
+          >
+            <div className="flex items-start gap-3">
+              <input
+                type="radio"
+                name="impossibleOption"
+                checked={selectedOption === 'different'}
+                onChange={() => setSelectedOption('different')}
+                className="mt-1"
+              />
+              <div className="flex-1">
+                <span className="font-medium text-gray-800">Try a different target</span>
+                <div className="mt-2 flex items-center gap-2">
+                  <div className="relative">
+                    <input
+                      type="number"
+                      step="0.5"
+                      min={minimumAchievableMB || 0.5}
+                      value={customTargetMB}
+                      onChange={(e) => handleCustomTargetChange(e.target.value)}
+                      onClick={() => setSelectedOption('different')}
+                      placeholder={Math.ceil(minSize).toString()}
+                      className={`w-24 px-3 py-1.5 rounded border text-sm ${
+                        customTargetError
+                          ? 'border-red-300 bg-red-50'
+                          : 'border-gray-300'
+                      } focus:outline-none focus:ring-2 focus:ring-blue-200`}
+                    />
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">
+                      MB
+                    </span>
+                  </div>
+                  <span className="text-sm text-gray-500">
+                    Suggested: {formatSize(Math.ceil(minSize))}
+                  </span>
+                </div>
+                {customTargetError && (
+                  <p className="text-xs text-red-500 mt-1">{customTargetError}</p>
+                )}
+              </div>
+            </div>
+          </label>
         </div>
 
-        <p className="text-xs text-gray-400 text-center">
-          "Compress anyway" will use maximum compression. Images may be unreadable.
-        </p>
+        {/* Continue button */}
+        <button
+          onClick={handleContinue}
+          disabled={isContinueDisabled}
+          className={`w-full py-3 px-4 rounded-lg font-semibold transition-all ${
+            isContinueDisabled
+              ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+              : 'bg-blue-600 text-white hover:bg-blue-700 shadow-md hover:shadow-lg'
+          }`}
+        >
+          Continue
+        </button>
       </div>
     );
   }
@@ -115,7 +273,7 @@ export default function FeasibilityResult({
       </button>
 
       <button
-        onClick={onChangeTarget}
+        onClick={() => onChangeTarget()}
         className="w-full py-2 text-sm text-gray-500 hover:text-gray-700"
       >
         Change target
