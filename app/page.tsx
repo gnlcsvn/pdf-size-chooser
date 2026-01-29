@@ -46,6 +46,8 @@ export default function Home() {
   const [toast, setToast] = useState<Toast | null>(null);
   const [backendConnected, setBackendConnected] = useState<boolean | null>(null);
   const [progressMessage, setProgressMessage] = useState<string | null>(null);
+  const [compressionProgress, setCompressionProgress] = useState<number | null>(null);
+  const [compressionMessage, setCompressionMessage] = useState<string | null>(null);
 
   // Refs to track active polling and prevent race conditions
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -194,6 +196,8 @@ export default function Home() {
     if (!jobId || !file || !selectedChoice) return;
 
     setStatus('compressing');
+    setCompressionProgress(0);
+    setCompressionMessage('Starting compression...');
 
     try {
       // Start compression based on choice type
@@ -203,13 +207,21 @@ export default function Home() {
         await compressWithQuality(jobId, selectedChoice.quality);
       }
 
-      // Poll for completion
+      // Poll for completion with progress tracking
       const finalStatus = await pollJobStatus(
         jobId,
         ['done'],
         {
-          interval: 1000,
+          interval: 500,
           timeout: 300000,
+          onProgress: (status) => {
+            if (typeof status.progress === 'number') {
+              setCompressionProgress(status.progress);
+            }
+            if (status.progressMessage) {
+              setCompressionMessage(status.progressMessage);
+            }
+          },
         }
       );
 
@@ -219,13 +231,19 @@ export default function Home() {
           quality: finalStatus.compressionResult.quality,
           originalSize: finalStatus.originalSize,
         });
+        setCompressionProgress(null);
+        setCompressionMessage(null);
         setStatus('done');
         showToast('success', 'Compression complete!');
       } else if (finalStatus.status === 'failed') {
+        setCompressionProgress(null);
+        setCompressionMessage(null);
         setStatus('failed');
         showToast('error', finalStatus.error || 'Compression failed');
       }
     } catch (err) {
+      setCompressionProgress(null);
+      setCompressionMessage(null);
       setStatus('failed');
       showToast(
         'error',
@@ -256,6 +274,8 @@ export default function Home() {
     setCompressionResult(null);
     setSelectedChoice(null);
     setProgressMessage(null);
+    setCompressionProgress(null);
+    setCompressionMessage(null);
     setStatus('idle');
   }, [cancelCurrentJob]);
 
@@ -271,7 +291,11 @@ export default function Home() {
 
       {/* Compressing Overlay */}
       {status === 'compressing' && file && (
-        <CompressingOverlay filename={file.name} />
+        <CompressingOverlay
+          filename={file.name}
+          progress={compressionProgress ?? undefined}
+          progressMessage={compressionMessage ?? undefined}
+        />
       )}
 
       {/* Toast Notification */}
