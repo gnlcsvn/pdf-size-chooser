@@ -1,7 +1,7 @@
 import Bull from 'bull';
 import { v4 as uuidv4 } from 'uuid';
 import { compressPdf, compressToTargetSize } from './ghostscript.js';
-import { estimateSizes, EstimationResult, findBestQuality } from './sampler.js';
+import { estimateSizes, EstimationResult, findBestQuality, CorruptPdfError } from './sampler.js';
 import { getJobPath, cleanupJob, ensureTempDir } from '../utils/tempFiles.js';
 import { PDFAnalysis } from './analyzer.js';
 
@@ -218,8 +218,19 @@ async function startEstimation(jobId: string): Promise<void> {
     });
   } catch (err) {
     console.error(`Estimation failed for job ${jobId}:`, err);
+
+    // Handle corrupt PDF errors with user-friendly message
+    if (err instanceof CorruptPdfError) {
+      updateJob(jobId, {
+        status: 'failed',
+        error: err.message,
+      });
+      return;
+    }
+
+    // For other errors, still allow compression attempt
     updateJob(jobId, {
-      status: 'ready', // Still allow compression even if estimation fails
+      status: 'ready',
       error: 'Estimation failed, but you can still compress',
     });
   }

@@ -52,20 +52,51 @@ export interface PDFAnalysis {
 }
 
 /**
+ * Custom error class for corrupt/invalid PDFs
+ */
+export class CorruptPdfError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'CorruptPdfError';
+  }
+}
+
+/**
  * Analyze a PDF file to understand its structure and compression potential
  */
 export async function analyzePdf(pdfPath: string): Promise<PDFAnalysis> {
   const startTime = Date.now();
 
   // Read the PDF file
-  const pdfBytes = await fs.readFile(pdfPath);
+  let pdfBytes: Buffer;
+  try {
+    pdfBytes = await fs.readFile(pdfPath);
+  } catch (err) {
+    throw new CorruptPdfError('Unable to read PDF file. The file may be corrupted or inaccessible.');
+  }
+
   const originalSize = pdfBytes.length;
 
+  // Basic PDF validation - check magic number
+  const pdfHeader = pdfBytes.slice(0, 5).toString('ascii');
+  if (!pdfHeader.startsWith('%PDF-')) {
+    throw new CorruptPdfError('This file is not a valid PDF. Please upload a PDF file.');
+  }
+
   // Load with pdf-lib
-  const pdfDoc = await PDFDocument.load(pdfBytes, {
-    ignoreEncryption: true,
-    updateMetadata: false,
-  });
+  let pdfDoc;
+  try {
+    pdfDoc = await PDFDocument.load(pdfBytes, {
+      ignoreEncryption: true,
+      updateMetadata: false,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unknown error';
+    if (message.includes('encrypted') || message.includes('password')) {
+      throw new CorruptPdfError('This PDF is password-protected. Please remove the password and try again.');
+    }
+    throw new CorruptPdfError('This PDF appears to be damaged or corrupted. Please try a different file.');
+  }
 
   const pageCount = pdfDoc.getPageCount();
 

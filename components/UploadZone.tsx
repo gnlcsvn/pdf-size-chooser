@@ -8,8 +8,12 @@ interface UploadZoneProps {
   disabled?: boolean;
 }
 
+const MAX_FILE_SIZE_MB = 250;
+const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
+
 export default function UploadZone({ file, onFileSelect, disabled = false }: UploadZoneProps) {
   const [isDragging, setIsDragging] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -21,6 +25,24 @@ export default function UploadZone({ file, onFileSelect, disabled = false }: Upl
     setIsDragging(false);
   }, []);
 
+  const validateAndSelectFile = useCallback((selectedFile: File) => {
+    setError(null);
+
+    // Check file type
+    if (selectedFile.type !== 'application/pdf') {
+      setError('Please upload a PDF file');
+      return;
+    }
+
+    // Check file size
+    if (selectedFile.size > MAX_FILE_SIZE_BYTES) {
+      setError(`File too large. Maximum size is ${MAX_FILE_SIZE_MB}MB.`);
+      return;
+    }
+
+    onFileSelect(selectedFile);
+  }, [onFileSelect]);
+
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
@@ -28,19 +50,19 @@ export default function UploadZone({ file, onFileSelect, disabled = false }: Upl
     if (disabled) return;
 
     const droppedFile = e.dataTransfer.files[0];
-    if (droppedFile && droppedFile.type === 'application/pdf') {
-      onFileSelect(droppedFile);
+    if (droppedFile) {
+      validateAndSelectFile(droppedFile);
     }
-  }, [onFileSelect, disabled]);
+  }, [validateAndSelectFile, disabled]);
 
   const handleFileInput = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     if (disabled) return;
 
     const selectedFile = e.target.files?.[0];
-    if (selectedFile && selectedFile.type === 'application/pdf') {
-      onFileSelect(selectedFile);
+    if (selectedFile) {
+      validateAndSelectFile(selectedFile);
     }
-  }, [onFileSelect, disabled]);
+  }, [validateAndSelectFile, disabled]);
 
   const formatFileSize = (bytes: number): string => {
     if (bytes < 1024) return bytes + ' B';
@@ -49,6 +71,7 @@ export default function UploadZone({ file, onFileSelect, disabled = false }: Upl
   };
 
   const handleRemove = useCallback(() => {
+    setError(null);
     onFileSelect(null);
   }, [onFileSelect]);
 
@@ -63,7 +86,9 @@ export default function UploadZone({ file, onFileSelect, disabled = false }: Upl
           transition-colors duration-200
           ${isDragging
             ? 'border-blue-500 bg-blue-50'
-            : 'border-gray-300 hover:border-gray-400 bg-gray-50'
+            : error
+              ? 'border-red-300 bg-red-50'
+              : 'border-gray-300 hover:border-gray-400 bg-gray-50'
           }
           ${file ? 'border-green-500 bg-green-50' : ''}
           ${disabled ? 'opacity-50 cursor-not-allowed' : ''}
@@ -79,22 +104,40 @@ export default function UploadZone({ file, onFileSelect, disabled = false }: Upl
 
         {!file ? (
           <div className="space-y-2">
-            <div className="text-4xl text-gray-400">
-              <svg className="mx-auto h-12 w-12" stroke="currentColor" fill="none" viewBox="0 0 48 48">
-                <path
-                  d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </div>
-            <p className="text-gray-600 font-medium">
-              Drag & drop your PDF here
-            </p>
-            <p className="text-gray-400 text-sm">
-              or click to browse
-            </p>
+            {error ? (
+              <>
+                <div className="text-red-500">
+                  <svg className="mx-auto h-12 w-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                </div>
+                <p className="text-red-600 font-medium">
+                  {error}
+                </p>
+                <p className="text-gray-400 text-sm">
+                  Try a different file
+                </p>
+              </>
+            ) : (
+              <>
+                <div className="text-4xl text-gray-400">
+                  <svg className="mx-auto h-12 w-12" stroke="currentColor" fill="none" viewBox="0 0 48 48">
+                    <path
+                      d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </div>
+                <p className="text-gray-600 font-medium">
+                  Drag & drop your PDF here
+                </p>
+                <p className="text-gray-400 text-sm">
+                  or click to browse
+                </p>
+              </>
+            )}
           </div>
         ) : (
           <div className="space-y-2">
