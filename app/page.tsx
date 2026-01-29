@@ -3,6 +3,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import UploadZone from '@/components/UploadZone';
 import EstimateDisplay, { CompressionChoice } from '@/components/EstimateDisplay';
+import FeasibilityResult from '@/components/FeasibilityResult';
 import AnalyzingOverlay from '@/components/AnalyzingOverlay';
 import CompressingOverlay from '@/components/CompressingOverlay';
 import {
@@ -374,26 +375,52 @@ export default function Home() {
                 onChoiceSelect={setSelectedChoice}
               />
 
-              <button
-                onClick={handleCompress}
-                disabled={!canCompress}
-                className={`
-                  w-full py-3 px-4 rounded-lg font-semibold text-white transition-all
-                  ${canCompress
-                    ? 'bg-blue-600 hover:bg-blue-700 shadow-md hover:shadow-lg'
-                    : 'bg-gray-300 cursor-not-allowed'
+              {/* Feasibility Result - shows when target is selected */}
+              {selectedChoice && selectedChoice.type === 'target' && (
+                <FeasibilityResult
+                  targetMB={selectedChoice.targetMB}
+                  targetLabel={selectedChoice.label}
+                  estimatedMB={
+                    // Find best estimate for this target
+                    [...estimates.estimates]
+                      .sort((a, b) => b.quality - a.quality)
+                      .find(e => e.estimatedSizeMB <= selectedChoice.targetMB)?.estimatedSizeMB
+                    || estimates.estimates[estimates.estimates.length - 1]?.estimatedSizeMB
+                    || selectedChoice.targetMB
                   }
-                `}
-              >
-                Compress PDF
-              </button>
+                  minimumAchievableMB={estimates.analysis?.minimumAchievableSizeMB}
+                  onCompress={handleCompress}
+                  onChangeTarget={() => setSelectedChoice(null)}
+                />
+              )}
 
-              <button
-                onClick={handleReset}
-                className="w-full py-2 text-sm text-gray-500 hover:text-gray-700"
-              >
-                Choose a different file
-              </button>
+              {/* Quality selection - show compress button directly */}
+              {selectedChoice && selectedChoice.type === 'quality' && (
+                <>
+                  <button
+                    onClick={handleCompress}
+                    className="w-full py-3 px-4 rounded-lg font-semibold text-white bg-blue-600 hover:bg-blue-700 shadow-md hover:shadow-lg transition-all"
+                  >
+                    Compress PDF
+                  </button>
+                  <button
+                    onClick={() => setSelectedChoice(null)}
+                    className="w-full py-2 text-sm text-gray-500 hover:text-gray-700"
+                  >
+                    Change selection
+                  </button>
+                </>
+              )}
+
+              {/* No selection yet */}
+              {!selectedChoice && (
+                <button
+                  onClick={handleReset}
+                  className="w-full py-2 text-sm text-gray-500 hover:text-gray-700"
+                >
+                  Choose a different file
+                </button>
+              )}
             </>
           )}
 
