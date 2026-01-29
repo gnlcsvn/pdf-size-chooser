@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { promises as fs } from 'fs';
 import { getJob, queueCompression, deleteJob, getQueueStats } from '../services/jobQueue.js';
 import { findBestQuality } from '../services/sampler.js';
+import { mbToBytes, formatBytesToMB } from '../utils/sizeUtils.js';
 
 export const jobRouter = Router();
 
@@ -73,20 +74,20 @@ jobRouter.get('/:id/estimate', async (req, res) => {
     return;
   }
 
-  // Format estimates for frontend
+  // Format estimates for frontend (using decimal MB to match OS display)
   const formattedEstimates = job.estimates.estimates.map((e) => ({
     quality: e.quality,
     estimatedSizeBytes: e.estimatedSize,
-    estimatedSizeMB: Number((e.estimatedSize / (1024 * 1024)).toFixed(2)),
+    estimatedSizeMB: formatBytesToMB(e.estimatedSize),
   }));
 
-  // Include analysis data if available
+  // Include analysis data if available (using decimal MB to match OS display)
   const analysis = job.estimates.analysis;
   const analysisResponse = analysis
     ? {
         images: {
           count: analysis.images.count,
-          totalSizeMB: Number((analysis.images.totalEstimatedSize / (1024 * 1024)).toFixed(2)),
+          totalSizeMB: formatBytesToMB(analysis.images.totalEstimatedSize),
         },
         fonts: {
           count: analysis.fonts.count,
@@ -98,9 +99,9 @@ jobRouter.get('/:id/estimate', async (req, res) => {
           hasAnnotations: analysis.metadata.hasAnnotations,
           hasForms: analysis.metadata.hasForms,
         },
-        compressibleContentMB: Number((analysis.compressibleContent / (1024 * 1024)).toFixed(2)),
-        fixedOverheadMB: Number((analysis.fixedOverhead / (1024 * 1024)).toFixed(2)),
-        minimumAchievableSizeMB: Number((analysis.minimumAchievableSize / (1024 * 1024)).toFixed(2)),
+        compressibleContentMB: formatBytesToMB(analysis.compressibleContent),
+        fixedOverheadMB: formatBytesToMB(analysis.fixedOverhead),
+        minimumAchievableSizeMB: formatBytesToMB(analysis.minimumAchievableSize),
         analysisTimeMs: analysis.analysisTimeMs,
       }
     : undefined;
@@ -108,7 +109,7 @@ jobRouter.get('/:id/estimate', async (req, res) => {
   res.json({
     status: job.status,
     originalSize: job.originalSize,
-    originalSizeMB: Number((job.originalSize / (1024 * 1024)).toFixed(2)),
+    originalSizeMB: formatBytesToMB(job.originalSize),
     pageCount: job.estimates.pageCount,
     sampledPages: job.estimates.estimates[0]?.samplePages || 0,
     samplingTimeMs: job.estimates.samplingTimeMs,
@@ -174,7 +175,7 @@ jobRouter.post('/:id/compress', async (req, res) => {
   let targetSizeBytes: number | undefined;
 
   if (targetSizeMB) {
-    targetSizeBytes = targetSizeMB * 1024 * 1024;
+    targetSizeBytes = mbToBytes(targetSizeMB);
 
     // If estimates are available, find best quality for target
     if (job.estimates) {

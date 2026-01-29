@@ -1,6 +1,7 @@
 import { spawn } from 'child_process';
 import { promises as fs } from 'fs';
 import path from 'path';
+import { MB } from '../utils/sizeUtils.js';
 
 // Quality presets map to Ghostscript PDFSETTINGS
 // We use custom dPDFSETTINGS with image quality controls for finer control
@@ -263,8 +264,8 @@ export async function compressToTargetSize(
     if (result.compressedSize <= targetSizeBytes) {
       // Success! File is under target
       console.log(
-        `✓ Verification passed: ${(result.compressedSize / 1024 / 1024).toFixed(2)}MB ` +
-        `≤ target ${(targetSizeBytes / 1024 / 1024).toFixed(2)}MB ` +
+        `✓ Verification passed: ${(result.compressedSize / MB).toFixed(2)}MB ` +
+        `≤ target ${(targetSizeBytes / MB).toFixed(2)}MB ` +
         `(attempt ${attempts}, quality ${currentQuality}%)`
       );
 
@@ -280,8 +281,8 @@ export async function compressToTargetSize(
 
     // File exceeds target - need to recompress
     console.log(
-      `✗ Verification failed: ${(result.compressedSize / 1024 / 1024).toFixed(2)}MB ` +
-      `> target ${(targetSizeBytes / 1024 / 1024).toFixed(2)}MB ` +
+      `✗ Verification failed: ${(result.compressedSize / MB).toFixed(2)}MB ` +
+      `> target ${(targetSizeBytes / MB).toFixed(2)}MB ` +
       `(attempt ${attempts}, quality ${currentQuality}%)`
     );
 
@@ -299,8 +300,8 @@ export async function compressToTargetSize(
   // Return the best result we have, but mark verification as failed
   console.error(
     `⚠ Verification gate exhausted after ${attempts} attempts. ` +
-    `Best result: ${(result!.compressedSize / 1024 / 1024).toFixed(2)}MB ` +
-    `(target was ${(targetSizeBytes / 1024 / 1024).toFixed(2)}MB)`
+    `Best result: ${(result!.compressedSize / MB).toFixed(2)}MB ` +
+    `(target was ${(targetSizeBytes / MB).toFixed(2)}MB)`
   );
 
   onProgress?.(100, 'Compression complete (target may not be achievable)');

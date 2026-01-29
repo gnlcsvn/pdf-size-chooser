@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { formatMB } from '@/lib/sizeUtils';
 
 interface FeasibilityResultProps {
   targetMB: number;
@@ -9,13 +10,6 @@ interface FeasibilityResultProps {
   minimumAchievableMB?: number;
   onCompress: () => void;
   onChangeTarget: (newTargetMB?: number) => void;
-}
-
-function formatSize(mb: number): string {
-  if (mb >= 1) {
-    return `${mb.toFixed(1)} MB`;
-  }
-  return `${(mb * 1024).toFixed(0)} KB`;
 }
 
 type ImpossibleTargetOption = 'compress' | 'different';
@@ -50,7 +44,7 @@ export default function FeasibilityResult({
     if (value && (isNaN(numValue) || numValue <= 0)) {
       setCustomTargetError('Enter a valid number');
     } else if (numValue && numValue < (minimumAchievableMB || 0.5)) {
-      setCustomTargetError(`Minimum achievable is ~${formatSize(minimumAchievableMB || 0.5)}`);
+      setCustomTargetError(`Minimum achievable is ~${formatMB(minimumAchievableMB || 0.5)}`);
     }
   };
 
@@ -84,10 +78,10 @@ export default function FeasibilityResult({
             </div>
             <div className="flex-1">
               <h3 className="font-semibold text-amber-800">
-                Your PDF can't be compressed below ~{formatSize(minSize)}
+                Your PDF can't be compressed below ~{formatMB(minSize)}
               </h3>
               <p className="text-sm text-amber-700 mt-1">
-                Target: {formatSize(targetMB)} • Minimum achievable: {formatSize(minSize)}
+                Target: {formatMB(targetMB)} • Minimum achievable: {formatMB(minSize)}
               </p>
             </div>
           </div>
@@ -161,7 +155,7 @@ export default function FeasibilityResult({
                     </span>
                   </div>
                   <span className="text-sm text-gray-500">
-                    Suggested: {formatSize(Math.ceil(minSize))}
+                    Suggested: {formatMB(Math.ceil(minSize))}
                   </span>
                 </div>
                 {customTargetError && (
@@ -204,9 +198,9 @@ export default function FeasibilityResult({
             </h3>
             <p className="text-sm text-green-700 mt-1">
               Estimated result:{' '}
-              <span className="font-semibold">{formatSize(estimatedMB)}</span>
+              <span className="font-semibold">{formatMB(estimatedMB)}</span>
               {isClose && (
-                <span className="text-green-600"> (target: {formatSize(targetMB)})</span>
+                <span className="text-green-600"> (target: {formatMB(targetMB)})</span>
               )}
             </p>
             {isMuchSmaller && (

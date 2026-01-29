@@ -18,6 +18,7 @@ import {
   EstimateResponse,
   checkHealth,
 } from '@/lib/api';
+import { formatBytes } from '@/lib/sizeUtils';
 
 type AppStatus =
   | 'idle'
@@ -92,11 +93,7 @@ export default function Home() {
     setTimeout(() => setToast(null), 5000);
   }, []);
 
-  const formatFileSize = (bytes: number): string => {
-    if (bytes < 1024) return bytes + ' B';
-    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-    return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
-  };
+  // Using formatBytes from sizeUtils for consistent decimal (SI) units
 
   const handleFileSelect = useCallback(
     async (selectedFile: File | null) => {
@@ -542,7 +539,7 @@ export default function Home() {
 
                 {/* Main success message */}
                 <h3 className="text-xl font-semibold text-gray-900 mb-2">
-                  Done. {formatFileSize(compressionResult.compressedSize)}
+                  Done. {formatBytes(compressionResult.compressedSize)}
                 </h3>
 
                 {/* "Fits in X with room to spare" message */}
@@ -565,7 +562,7 @@ export default function Home() {
                   <div className="text-center">
                     <p className="text-xs text-gray-400 uppercase tracking-wide">Original</p>
                     <p className="text-lg font-semibold text-gray-400 line-through">
-                      {formatFileSize(compressionResult.originalSize)}
+                      {formatBytes(compressionResult.originalSize)}
                     </p>
                   </div>
                   <svg
@@ -584,7 +581,7 @@ export default function Home() {
                   <div className="text-center">
                     <p className="text-xs text-gray-400 uppercase tracking-wide">Compressed</p>
                     <p className="text-lg font-semibold text-green-600">
-                      {formatFileSize(compressionResult.compressedSize)}
+                      {formatBytes(compressionResult.compressedSize)}
                     </p>
                   </div>
                 </div>
