@@ -3,6 +3,7 @@ import multer from 'multer';
 import path from 'path';
 import { createJob } from '../services/jobQueue.js';
 import { getTempDir, ensureTempDir } from '../utils/tempFiles.js';
+import { MB } from '../utils/sizeUtils.js';
 
 export const uploadRouter = Router();
 
@@ -22,7 +23,7 @@ const storage = multer.diskStorage({
 const upload = multer({
   storage,
   limits: {
-    fileSize: 250 * 1024 * 1024, // 250MB max
+    fileSize: 250 * MB, // 250MB max (decimal)
   },
   fileFilter: (req, file, cb) => {
     // Accept only PDF files

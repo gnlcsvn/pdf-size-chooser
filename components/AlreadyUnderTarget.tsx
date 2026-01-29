@@ -1,5 +1,7 @@
 'use client';
 
+import { formatMB } from '@/lib/sizeUtils';
+
 interface AlreadyUnderTargetProps {
   originalSizeMB: number;
   targetMB: number;
@@ -7,13 +9,6 @@ interface AlreadyUnderTargetProps {
   onCompressAnyway: () => void;
   onChangeTarget: () => void;
   onStartOver: () => void;
-}
-
-function formatSize(mb: number): string {
-  if (mb >= 1) {
-    return `${mb.toFixed(1)} MB`;
-  }
-  return `${(mb * 1024).toFixed(0)} KB`;
 }
 
 export default function AlreadyUnderTarget({
@@ -39,8 +34,8 @@ export default function AlreadyUnderTarget({
               Good news! No compression needed.
             </h3>
             <p className="text-sm text-green-700 mt-1">
-              Your file is already <span className="font-semibold">{formatSize(originalSizeMB)}</span>
-              {' '}&mdash; under the {formatSize(targetMB)} limit for {targetLabel}.
+              Your file is already <span className="font-semibold">{formatMB(originalSizeMB)}</span>
+              {' '}&mdash; under the {formatMB(targetMB)} limit for {targetLabel}.
             </p>
           </div>
         </div>

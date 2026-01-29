@@ -2,6 +2,7 @@
 
 import { SizeEstimate, PDFAnalysis } from '@/lib/api';
 import TargetSelector, { TargetSelection } from './TargetSelector';
+import { formatMB } from '@/lib/sizeUtils';
 
 type CompressionChoice =
   | { type: 'quality'; quality: number }
@@ -14,13 +15,6 @@ interface EstimateDisplayProps {
   analysis?: PDFAnalysis;
   selectedChoice: CompressionChoice | null;
   onChoiceSelect: (choice: CompressionChoice) => void;
-}
-
-function formatSize(mb: number): string {
-  if (mb >= 1) {
-    return `${mb.toFixed(1)} MB`;
-  }
-  return `${(mb * 1024).toFixed(0)} KB`;
 }
 
 const qualityDescriptions: Record<number, { label: string; description: string }> = {
@@ -109,7 +103,7 @@ export default function EstimateDisplay({
         <div className="text-center">
           <p className="text-gray-600">
             Your PDF has <span className="font-semibold">{pageCount} pages</span> and is currently{' '}
-            <span className="font-semibold">{formatSize(originalSizeMB)}</span>
+            <span className="font-semibold">{formatMB(originalSizeMB)}</span>
           </p>
         </div>
 
@@ -119,7 +113,7 @@ export default function EstimateDisplay({
             {analysis.images.count > 0 && (
               <span>
                 {analysis.images.count} image{analysis.images.count !== 1 ? 's' : ''}{' '}
-                <span className="text-gray-400">({formatSize(analysis.images.totalSizeMB)})</span>
+                <span className="text-gray-400">({formatMB(analysis.images.totalSizeMB)})</span>
               </span>
             )}
             {analysis.fonts.count > 0 && (
@@ -129,7 +123,7 @@ export default function EstimateDisplay({
             )}
             {analysis.compressibleContentMB > 0 && (
               <span className="text-green-600">
-                {formatSize(analysis.compressibleContentMB)} compressible
+                {formatMB(analysis.compressibleContentMB)} compressible
               </span>
             )}
           </div>
@@ -138,7 +132,7 @@ export default function EstimateDisplay({
         {/* Minimum achievable size hint */}
         {analysis && analysis.minimumAchievableSizeMB > 0 && (
           <p className="text-xs text-gray-400 text-center">
-            Minimum achievable: ~{formatSize(analysis.minimumAchievableSizeMB)}
+            Minimum achievable: ~{formatMB(analysis.minimumAchievableSizeMB)}
           </p>
         )}
       </div>
@@ -213,7 +207,7 @@ export default function EstimateDisplay({
                   </div>
                   <div className="text-right">
                     <p className={`font-semibold text-sm ${isSelected ? 'text-blue-700' : 'text-gray-800'}`}>
-                      {formatSize(estimate.estimatedSizeMB)}
+                      {formatMB(estimate.estimatedSizeMB)}
                     </p>
                     <p className="text-xs text-green-600">-{savings}%</p>
                   </div>

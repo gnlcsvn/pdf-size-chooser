@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useState } from 'react';
+import { formatBytes, MB } from '@/lib/sizeUtils';
 
 interface UploadZoneProps {
   file: File | null;
@@ -9,7 +10,7 @@ interface UploadZoneProps {
 }
 
 const MAX_FILE_SIZE_MB = 250;
-const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
+const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * MB;
 
 export default function UploadZone({ file, onFileSelect, disabled = false }: UploadZoneProps) {
   const [isDragging, setIsDragging] = useState(false);
@@ -63,12 +64,6 @@ export default function UploadZone({ file, onFileSelect, disabled = false }: Upl
       validateAndSelectFile(selectedFile);
     }
   }, [validateAndSelectFile, disabled]);
-
-  const formatFileSize = (bytes: number): string => {
-    if (bytes < 1024) return bytes + ' B';
-    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-    return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
-  };
 
   const handleRemove = useCallback(() => {
     setError(null);
@@ -150,7 +145,7 @@ export default function UploadZone({ file, onFileSelect, disabled = false }: Upl
               {file.name}
             </p>
             <p className="text-gray-500 text-sm">
-              Original size: <span className="font-semibold">{formatFileSize(file.size)}</span>
+              Original size: <span className="font-semibold">{formatBytes(file.size)}</span>
             </p>
           </div>
         )}

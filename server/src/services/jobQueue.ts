@@ -4,6 +4,7 @@ import { compressPdf, compressToTargetSize } from './ghostscript.js';
 import { estimateSizes, EstimationResult, findBestQuality, CorruptPdfError } from './sampler.js';
 import { getJobPath, cleanupJob, ensureTempDir } from '../utils/tempFiles.js';
 import { PDFAnalysis } from './analyzer.js';
+import { MB } from '../utils/sizeUtils.js';
 
 export interface Job {
   id: string;
@@ -80,7 +81,7 @@ export function initJobQueue(): void {
           if (job.estimates?.estimates) {
             const bestQuality = findBestQuality(job.estimates.estimates, targetSizeBytes);
             finalQuality = bestQuality.quality;
-            console.log(`Target: ${(targetSizeBytes / 1024 / 1024).toFixed(2)}MB, using quality ${finalQuality}%`);
+            console.log(`Target: ${(targetSizeBytes / MB).toFixed(2)}MB, using quality ${finalQuality}%`);
           }
 
           // Single-pass compression at calculated quality
@@ -274,7 +275,7 @@ export async function queueCompression(
         if (job.estimates?.estimates) {
           const bestQuality = findBestQuality(job.estimates.estimates, options.targetSizeBytes);
           finalQuality = bestQuality.quality;
-          console.log(`Target: ${(options.targetSizeBytes / 1024 / 1024).toFixed(2)}MB, using quality ${finalQuality}%`);
+          console.log(`Target: ${(options.targetSizeBytes / MB).toFixed(2)}MB, using quality ${finalQuality}%`);
         }
 
         // Single-pass compression at calculated quality
