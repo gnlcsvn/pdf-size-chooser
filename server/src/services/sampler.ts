@@ -2,7 +2,9 @@ import path from 'path';
 import { promises as fs } from 'fs';
 import { getPageCount, extractPages, compressPdf } from './ghostscript.js';
 import { getTempDir } from '../utils/tempFiles.js';
-import { analyzePdf, PDFAnalysis } from './analyzer.js';
+import { analyzePdf, PDFAnalysis, CorruptPdfError } from './analyzer.js';
+
+export { CorruptPdfError };
 
 export interface SizeEstimate {
   quality: number;
@@ -72,6 +74,10 @@ export async function estimateSizes(
     analysis = await analyzePdf(inputPath);
     onProgress?.(`Found ${analysis.images.count} images, ${analysis.fonts.count} fonts`);
   } catch (err) {
+    // Re-throw CorruptPdfError so it propagates to the user
+    if (err instanceof CorruptPdfError) {
+      throw err;
+    }
     console.error('PDF analysis failed, continuing with basic estimation:', err);
   }
 

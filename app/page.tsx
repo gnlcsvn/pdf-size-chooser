@@ -4,6 +4,7 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import UploadZone from '@/components/UploadZone';
 import EstimateDisplay, { CompressionChoice } from '@/components/EstimateDisplay';
 import FeasibilityResult from '@/components/FeasibilityResult';
+import AlreadyUnderTarget from '@/components/AlreadyUnderTarget';
 import AnalyzingOverlay from '@/components/AnalyzingOverlay';
 import CompressingOverlay from '@/components/CompressingOverlay';
 import {
@@ -27,6 +28,8 @@ type AppStatus =
   | 'done'
   | 'failed';
 
+type FailureType = 'upload' | 'analysis' | 'compression' | null;
+
 interface Toast {
   type: 'success' | 'error' | 'warning';
   message: string;
@@ -48,6 +51,8 @@ export default function Home() {
   const [progressMessage, setProgressMessage] = useState<string | null>(null);
   const [compressionProgress, setCompressionProgress] = useState<number | null>(null);
   const [compressionMessage, setCompressionMessage] = useState<string | null>(null);
+  const [failureType, setFailureType] = useState<FailureType>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Refs to track active polling and prevent race conditions
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -104,6 +109,8 @@ export default function Home() {
       setEstimates(null);
       setCompressionResult(null);
       setSelectedChoice(null);
+      setFailureType(null);
+      setErrorMessage(null);
       setStatus('idle');
 
       if (!selectedFile) return;
@@ -160,12 +167,17 @@ export default function Home() {
                 setStatus('ready');
               } catch (err) {
                 setStatus('failed');
+                setFailureType('analysis');
+                setErrorMessage('Failed to get size estimates');
                 showToast('error', 'Failed to get size estimates');
               }
             } else if (jobStatus.status === 'failed') {
               cleanupPolling();
               setStatus('failed');
-              showToast('error', jobStatus.error || 'Failed to analyze PDF');
+              setFailureType('analysis');
+              const errMsg = jobStatus.error || 'Failed to analyze PDF';
+              setErrorMessage(errMsg);
+              showToast('error', errMsg);
             }
           } catch (err) {
             // Continue polling on transient errors
@@ -177,16 +189,18 @@ export default function Home() {
           if (activeJobIdRef.current === currentJobId) {
             cleanupPolling();
             setStatus('failed');
+            setFailureType('analysis');
+            setErrorMessage('Analysis took too long. Please try again.');
             showToast('error', 'Analysis took too long. Please try again.');
           }
         }, 120000);
       } catch (err) {
         cleanupPolling();
         setStatus('failed');
-        showToast(
-          'error',
-          err instanceof Error ? err.message : 'Upload failed'
-        );
+        setFailureType('upload');
+        const errMsg = err instanceof Error ? err.message : 'Upload failed';
+        setErrorMessage(errMsg);
+        showToast('error', errMsg);
       }
     },
     [backendConnected, showToast, cancelCurrentJob, cleanupPolling]
@@ -239,16 +253,19 @@ export default function Home() {
         setCompressionProgress(null);
         setCompressionMessage(null);
         setStatus('failed');
-        showToast('error', finalStatus.error || 'Compression failed');
+        setFailureType('compression');
+        const errMsg = finalStatus.error || 'Compression failed';
+        setErrorMessage(errMsg);
+        showToast('error', errMsg);
       }
     } catch (err) {
       setCompressionProgress(null);
       setCompressionMessage(null);
       setStatus('failed');
-      showToast(
-        'error',
-        err instanceof Error ? err.message : 'Compression failed'
-      );
+      setFailureType('compression');
+      const errMsg = err instanceof Error ? err.message : 'Compression failed';
+      setErrorMessage(errMsg);
+      showToast('error', errMsg);
     }
   }, [jobId, file, selectedChoice, showToast]);
 
@@ -276,8 +293,38 @@ export default function Home() {
     setProgressMessage(null);
     setCompressionProgress(null);
     setCompressionMessage(null);
+    setFailureType(null);
+    setErrorMessage(null);
     setStatus('idle');
   }, [cancelCurrentJob]);
+
+  // Retry handler - keeps file, re-attempts the failed operation
+  const handleRetry = useCallback(() => {
+    if (!file) {
+      handleReset();
+      return;
+    }
+
+    // Clear error state
+    setFailureType(null);
+    setErrorMessage(null);
+
+    if (failureType === 'upload' || failureType === 'analysis') {
+      // Re-upload and re-analyze
+      handleFileSelect(file);
+    } else if (failureType === 'compression') {
+      // Re-attempt compression (file and estimates are still valid)
+      if (jobId && selectedChoice) {
+        handleCompress();
+      } else {
+        // Fallback to re-upload if state is inconsistent
+        handleFileSelect(file);
+      }
+    } else {
+      // Unknown failure, try re-uploading
+      handleFileSelect(file);
+    }
+  }, [file, failureType, jobId, selectedChoice, handleFileSelect, handleCompress, handleReset]);
 
   const canCompress = selectedChoice !== null && status === 'ready';
   const isAnalyzing = status === 'uploading' || status === 'estimating';
@@ -401,33 +448,45 @@ export default function Home() {
 
               {/* Feasibility Result - shows when target is selected */}
               {selectedChoice && selectedChoice.type === 'target' && (
-                <FeasibilityResult
-                  targetMB={selectedChoice.targetMB}
-                  targetLabel={selectedChoice.label}
-                  estimatedMB={
-                    // Find best estimate for this target
-                    [...estimates.estimates]
-                      .sort((a, b) => b.quality - a.quality)
-                      .find(e => e.estimatedSizeMB <= selectedChoice.targetMB)?.estimatedSizeMB
-                    || estimates.estimates[estimates.estimates.length - 1]?.estimatedSizeMB
-                    || selectedChoice.targetMB
-                  }
-                  minimumAchievableMB={estimates.analysis?.minimumAchievableSizeMB}
-                  onCompress={handleCompress}
-                  onChangeTarget={(newTargetMB) => {
-                    if (newTargetMB) {
-                      // User selected a new target from the impossible target screen
-                      setSelectedChoice({
-                        type: 'target',
-                        targetMB: newTargetMB,
-                        label: `${newTargetMB} MB`,
-                      });
-                    } else {
-                      // User wants to go back to selection
-                      setSelectedChoice(null);
+                // Check if file is already under target
+                estimates.originalSizeMB <= selectedChoice.targetMB ? (
+                  <AlreadyUnderTarget
+                    originalSizeMB={estimates.originalSizeMB}
+                    targetMB={selectedChoice.targetMB}
+                    targetLabel={selectedChoice.label}
+                    onCompressAnyway={handleCompress}
+                    onChangeTarget={() => setSelectedChoice(null)}
+                    onStartOver={handleReset}
+                  />
+                ) : (
+                  <FeasibilityResult
+                    targetMB={selectedChoice.targetMB}
+                    targetLabel={selectedChoice.label}
+                    estimatedMB={
+                      // Find best estimate for this target
+                      [...estimates.estimates]
+                        .sort((a, b) => b.quality - a.quality)
+                        .find(e => e.estimatedSizeMB <= selectedChoice.targetMB)?.estimatedSizeMB
+                      || estimates.estimates[estimates.estimates.length - 1]?.estimatedSizeMB
+                      || selectedChoice.targetMB
                     }
-                  }}
-                />
+                    minimumAchievableMB={estimates.analysis?.minimumAchievableSizeMB}
+                    onCompress={handleCompress}
+                    onChangeTarget={(newTargetMB) => {
+                      if (newTargetMB) {
+                        // User selected a new target from the impossible target screen
+                        setSelectedChoice({
+                          type: 'target',
+                          targetMB: newTargetMB,
+                          label: `${newTargetMB} MB`,
+                        });
+                      } else {
+                        // User wants to go back to selection
+                        setSelectedChoice(null);
+                      }
+                    }}
+                  />
+                )
               )}
 
               {/* Quality selection - show compress button directly */}
@@ -569,16 +628,34 @@ export default function Home() {
                 </svg>
               </div>
               <h3 className="text-xl font-semibold text-gray-900 mb-1">
-                Something went wrong
+                {failureType === 'upload'
+                  ? 'Upload failed'
+                  : failureType === 'analysis'
+                  ? 'Analysis failed'
+                  : failureType === 'compression'
+                  ? 'Compression failed'
+                  : 'Something went wrong'}
               </h3>
               <p className="text-gray-500 mb-4">
-                We couldn't process your PDF. Please try again.
+                {errorMessage || "We couldn't process your PDF. Please try again."}
               </p>
+
+              {/* Retry button - keeps file if possible */}
+              {file && (
+                <button
+                  onClick={handleRetry}
+                  className="px-6 py-2 rounded-lg font-medium text-white bg-blue-600 hover:bg-blue-700 transition-colors mb-2"
+                >
+                  {failureType === 'compression' ? 'Retry compression' : 'Try again'}
+                </button>
+              )}
+
+              {/* Try different file button */}
               <button
                 onClick={handleReset}
-                className="px-6 py-2 rounded-lg font-medium text-blue-600 hover:bg-blue-50 transition-colors"
+                className="block mx-auto px-6 py-2 text-sm text-gray-500 hover:text-gray-700 transition-colors"
               >
-                Try again
+                {file ? 'Try a different file' : 'Start over'}
               </button>
             </div>
           )}
