@@ -108,6 +108,11 @@ jobRouter.get('/:id/estimate', async (req, res) => {
     samplingTimeMs: job.estimates.samplingTimeMs,
     estimates: formattedEstimates,
     analysis: analysisResponse,
+    // Estimation confidence metrics (for debugging/transparency)
+    estimationConfidence: {
+      variance: job.estimates.estimationVariance,
+      safetyMarginApplied: job.estimates.safetyMarginApplied,
+    },
   });
 });
 
