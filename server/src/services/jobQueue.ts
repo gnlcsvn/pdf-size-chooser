@@ -16,6 +16,10 @@ export interface Job {
     outputPath: string;
     compressedSize: number;
     quality: number;
+    // Verification gate results
+    verificationPassed: boolean;
+    attempts: number;
+    targetSizeBytes?: number;
   };
   error?: string;
   progress?: number;
@@ -95,13 +99,24 @@ export function initJobQueue(): void {
           result = await compressPdf(job.uploadPath, outputPath, finalQuality);
         }
 
+        // Check verification result for target-based compression
+        const verificationPassed = 'verificationPassed' in result
+          ? (result as { verificationPassed: boolean }).verificationPassed
+          : true;
+        const attempts = 'attempts' in result
+          ? (result as { attempts: number }).attempts
+          : 1;
+
         updateJob(jobId, {
           status: 'done',
           progress: 100,
           compressionResult: {
             outputPath: result.outputPath,
             compressedSize: result.compressedSize,
-            quality: 'quality' in result ? result.quality : finalQuality,
+            quality: 'quality' in result ? (result as { quality: number }).quality : finalQuality,
+            verificationPassed,
+            attempts,
+            targetSizeBytes,
           },
         });
 
@@ -265,6 +280,10 @@ export async function queueCompression(
         result = await compressPdf(job.uploadPath, outputPath, finalQuality);
       }
 
+      // Check verification result for target-based compression
+      const verificationPassed = 'verificationPassed' in result ? (result as { verificationPassed: boolean }).verificationPassed : true;
+      const attempts = 'attempts' in result ? (result as { attempts: number }).attempts : 1;
+
       updateJob(jobId, {
         status: 'done',
         progress: 100,
@@ -272,6 +291,9 @@ export async function queueCompression(
           outputPath: result.outputPath,
           compressedSize: result.compressedSize,
           quality: 'quality' in result ? (result as { quality: number }).quality : finalQuality,
+          verificationPassed,
+          attempts,
+          targetSizeBytes: options.targetSizeBytes,
         },
       });
     } catch (err) {

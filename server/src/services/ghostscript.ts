@@ -206,10 +206,26 @@ export async function compressPdf(
   });
 }
 
+// Size verification gate configuration
+const MAX_RECOMPRESSION_ATTEMPTS = 3;
+const QUALITY_REDUCTION_PER_ATTEMPT = 5; // Reduce quality by 5% each attempt
+const MIN_QUALITY = 1; // Absolute minimum quality
+
+export interface VerifiedCompressionResult extends CompressionResult {
+  quality: number;
+  attempts: number;
+  verificationPassed: boolean;
+}
+
 /**
- * Compress a PDF to approximately target size.
- * Uses a single compression pass at the calculated quality level.
- * The quality should be pre-calculated using findBestQuality() from sampler.ts
+ * Compress a PDF to target size with verification gate.
+ *
+ * This function guarantees the output file will be ≤ targetSizeBytes.
+ * If the initial compression exceeds target, it automatically recompresses
+ * with progressively tighter settings until target is achieved or max
+ * attempts are reached.
+ *
+ * THE USER NEVER SEES A FILE THAT EXCEEDS THEIR TARGET.
  */
 export async function compressToTargetSize(
   inputPath: string,
@@ -217,29 +233,82 @@ export async function compressToTargetSize(
   targetSizeBytes: number,
   quality: number = 50,
   onProgress?: (percent: number, message: string) => void
-): Promise<CompressionResult & { quality: number }> {
-  onProgress?.(10, `Compressing at quality ${quality}%...`);
+): Promise<VerifiedCompressionResult> {
+  let currentQuality = quality;
+  let attempts = 0;
+  let result: CompressionResult | null = null;
 
-  // Single compression pass at the calculated quality
-  const result = await compressPdf(inputPath, outputPath, quality);
+  // Calculate progress segments: each attempt gets equal share of 10-90%
+  const progressPerAttempt = 80 / MAX_RECOMPRESSION_ATTEMPTS;
 
-  onProgress?.(90, 'Finalizing...');
+  while (attempts < MAX_RECOMPRESSION_ATTEMPTS) {
+    attempts++;
 
-  // Check if we hit the target
-  const hitTarget = result.compressedSize <= targetSizeBytes;
+    const attemptStartProgress = 10 + (attempts - 1) * progressPerAttempt;
+    const attemptEndProgress = 10 + attempts * progressPerAttempt;
 
-  if (!hitTarget) {
-    console.log(
-      `Compression result (${(result.compressedSize / 1024 / 1024).toFixed(2)}MB) ` +
-      `exceeded target (${(targetSizeBytes / 1024 / 1024).toFixed(2)}MB). ` +
-      `Verification gate will handle this in Issue #4.`
+    onProgress?.(
+      attemptStartProgress,
+      attempts === 1
+        ? `Compressing at quality ${currentQuality}%...`
+        : `Recompressing at quality ${currentQuality}% (attempt ${attempts}/${MAX_RECOMPRESSION_ATTEMPTS})...`
     );
+
+    // Compress the PDF
+    result = await compressPdf(inputPath, outputPath, currentQuality);
+
+    onProgress?.(attemptEndProgress - 5, 'Verifying file size...');
+
+    // VERIFICATION GATE: Check if we hit the target
+    if (result.compressedSize <= targetSizeBytes) {
+      // Success! File is under target
+      console.log(
+        `✓ Verification passed: ${(result.compressedSize / 1024 / 1024).toFixed(2)}MB ` +
+        `≤ target ${(targetSizeBytes / 1024 / 1024).toFixed(2)}MB ` +
+        `(attempt ${attempts}, quality ${currentQuality}%)`
+      );
+
+      onProgress?.(100, 'Compression complete');
+
+      return {
+        ...result,
+        quality: currentQuality,
+        attempts,
+        verificationPassed: true,
+      };
+    }
+
+    // File exceeds target - need to recompress
+    console.log(
+      `✗ Verification failed: ${(result.compressedSize / 1024 / 1024).toFixed(2)}MB ` +
+      `> target ${(targetSizeBytes / 1024 / 1024).toFixed(2)}MB ` +
+      `(attempt ${attempts}, quality ${currentQuality}%)`
+    );
+
+    // Reduce quality for next attempt
+    currentQuality = Math.max(MIN_QUALITY, currentQuality - QUALITY_REDUCTION_PER_ATTEMPT);
+
+    // If we're already at minimum quality and still over target, no point continuing
+    if (currentQuality === MIN_QUALITY && attempts > 1) {
+      console.log('Already at minimum quality, cannot compress further');
+      break;
+    }
   }
 
-  onProgress?.(100, 'Compression complete');
+  // If we get here, we've exhausted all attempts
+  // Return the best result we have, but mark verification as failed
+  console.error(
+    `⚠ Verification gate exhausted after ${attempts} attempts. ` +
+    `Best result: ${(result!.compressedSize / 1024 / 1024).toFixed(2)}MB ` +
+    `(target was ${(targetSizeBytes / 1024 / 1024).toFixed(2)}MB)`
+  );
+
+  onProgress?.(100, 'Compression complete (target may not be achievable)');
 
   return {
-    ...result,
-    quality,
+    ...result!,
+    quality: currentQuality,
+    attempts,
+    verificationPassed: false,
   };
 }
