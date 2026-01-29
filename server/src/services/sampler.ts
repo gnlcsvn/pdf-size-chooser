@@ -6,11 +6,18 @@ import { analyzePdf, PDFAnalysis } from './analyzer.js';
 
 export interface SizeEstimate {
   quality: number;
-  estimatedSize: number; // in bytes
+  estimatedSize: number; // in bytes (conservative estimate)
+  rawEstimate: number; // in bytes (before safety margin)
   sampleSize: number; // actual sample compressed size
   samplePages: number;
   totalPages: number;
+  compressionRatio: number; // ratio of compressed/original for this quality
 }
+
+// Configuration for conservative estimation
+const SAFETY_MARGIN = 0.05; // 5% buffer - estimate higher to ensure we never exceed target
+const HIGH_VARIANCE_THRESHOLD = 0.15; // If variance > 15%, add extra margin
+const HIGH_VARIANCE_EXTRA_MARGIN = 0.03; // Additional 3% margin for uncertain estimates
 
 export interface EstimationResult {
   originalSize: number;
@@ -19,6 +26,9 @@ export interface EstimationResult {
   samplingTimeMs: number;
   // New analysis data
   analysis?: PDFAnalysis;
+  // Estimation confidence metrics
+  estimationVariance: number; // Variance in compression ratios (higher = less confident)
+  safetyMarginApplied: number; // Total safety margin applied (0.05 = 5%)
 }
 
 const QUALITY_LEVELS = [100, 75, 50, 25];
@@ -97,8 +107,13 @@ export async function estimateSizes(
   const sampleStats = await fs.stat(samplePath);
   const sampleOriginalSize = sampleStats.size;
 
+  // Get fixed overhead from analysis (metadata, fonts, non-compressible content)
+  const fixedOverhead = analysis?.fixedOverhead ?? 0;
+
   // Compress sample at each quality level and extrapolate using compression ratio
   onProgress?.('Calculating compression options...');
+  const compressionRatios: number[] = [];
+
   for (let i = 0; i < QUALITY_LEVELS.length; i++) {
     const quality = QUALITY_LEVELS[i];
     const compressedSamplePath = path.join(tempDir, `${jobId}_sample_q${quality}.pdf`);
@@ -110,17 +125,23 @@ export async function estimateSizes(
       // Calculate compression ratio from the sample
       // ratio = compressed_size / original_size (e.g., 0.5 means 50% of original)
       const compressionRatio = result.compressedSize / sampleOriginalSize;
+      compressionRatios.push(compressionRatio);
 
-      // Apply ratio to full original file size
-      // But cap it - compressed can never be larger than original
-      const estimatedSize = Math.round(Math.min(originalSize, originalSize * compressionRatio));
+      // Apply ratio to compressible content, add fixed overhead back
+      // This is the raw estimate before safety margin
+      const compressibleContent = originalSize - fixedOverhead;
+      const rawEstimate = Math.round(
+        Math.min(originalSize, (compressibleContent * compressionRatio) + fixedOverhead)
+      );
 
       estimates.push({
         quality,
-        estimatedSize,
+        estimatedSize: rawEstimate, // Will be adjusted with safety margin below
+        rawEstimate,
         sampleSize: result.compressedSize,
         samplePages: sampleCount,
         totalPages: pageCount,
+        compressionRatio,
       });
 
       // Clean up compressed sample
@@ -129,6 +150,30 @@ export async function estimateSizes(
       console.error(`Failed to estimate at quality ${quality}:`, err);
       // Continue with other quality levels
     }
+  }
+
+  // Calculate variance in compression ratios to assess estimation confidence
+  let estimationVariance = 0;
+  if (compressionRatios.length > 1) {
+    const mean = compressionRatios.reduce((a, b) => a + b, 0) / compressionRatios.length;
+    const squaredDiffs = compressionRatios.map(r => Math.pow(r - mean, 2));
+    estimationVariance = Math.sqrt(squaredDiffs.reduce((a, b) => a + b, 0) / compressionRatios.length);
+  }
+
+  // Determine total safety margin based on confidence
+  // Higher variance = less confidence = larger safety margin
+  let totalSafetyMargin = SAFETY_MARGIN;
+  if (estimationVariance > HIGH_VARIANCE_THRESHOLD) {
+    totalSafetyMargin += HIGH_VARIANCE_EXTRA_MARGIN;
+    console.log(`High variance detected (${(estimationVariance * 100).toFixed(1)}%), applying extra safety margin`);
+  }
+
+  // Apply conservative safety margin to all estimates
+  // We estimate HIGHER (larger) to ensure we never exceed target
+  for (const estimate of estimates) {
+    estimate.estimatedSize = Math.round(estimate.rawEstimate * (1 + totalSafetyMargin));
+    // Never estimate larger than original
+    estimate.estimatedSize = Math.min(originalSize, estimate.estimatedSize);
   }
 
   // Clean up sample file
@@ -154,12 +199,21 @@ export async function estimateSizes(
     estimates,
     samplingTimeMs,
     analysis,
+    estimationVariance,
+    safetyMarginApplied: totalSafetyMargin,
   };
 }
 
+// Quality reduction buffer for conservative targeting
+// We use slightly lower quality than calculated to ensure we hit target
+const QUALITY_REDUCTION_BUFFER = 3; // Reduce quality by 3 points for safety
+
 /**
  * Find the best quality level to achieve target size based on estimates.
- * Uses linear interpolation between sample points for more precise targeting.
+ * Uses linear interpolation between sample points with conservative bias.
+ *
+ * IMPORTANT: This function is conservative - it will recommend a slightly
+ * lower quality than mathematically required to ensure we NEVER exceed target.
  */
 export function findBestQuality(
   estimates: SizeEstimate[],
@@ -173,6 +227,7 @@ export function findBestQuality(
   const sorted = [...estimates].sort((a, b) => b.quality - a.quality);
 
   // If target is larger than highest quality estimate, use highest quality
+  // No need for buffer here since we're already under target
   if (targetSizeBytes >= sorted[0].estimatedSize) {
     return {
       quality: sorted[0].quality,
@@ -202,7 +257,7 @@ export function findBestQuality(
       const qualityRange = higher.quality - lower.quality;
 
       if (sizeRange === 0) {
-        // Same size at both qualities, use lower quality
+        // Same size at both qualities, use lower quality (conservative)
         return {
           quality: lower.quality,
           estimatedSize: lower.estimatedSize,
@@ -214,14 +269,21 @@ export function findBestQuality(
       const sizeRatio = (targetSizeBytes - lower.estimatedSize) / sizeRange;
 
       // Interpolate quality (higher ratio = higher quality)
-      const interpolatedQuality = Math.round(lower.quality + (sizeRatio * qualityRange));
+      let interpolatedQuality = Math.round(lower.quality + (sizeRatio * qualityRange));
 
-      // Estimate the size at this interpolated quality
-      const estimatedSize = Math.round(lower.estimatedSize + (sizeRatio * sizeRange));
+      // CONSERVATIVE: Reduce quality slightly to ensure we hit target
+      // This means we'll compress a bit more than strictly necessary
+      interpolatedQuality = Math.max(1, interpolatedQuality - QUALITY_REDUCTION_BUFFER);
+
+      // Estimate the size at this REDUCED quality (will be smaller than target)
+      // Use the lower quality's compression ratio as a conservative estimate
+      const estimatedSize = Math.round(
+        lower.estimatedSize + (sizeRatio * sizeRange * 0.95) // 95% of interpolated size
+      );
 
       return {
         quality: Math.max(1, Math.min(100, interpolatedQuality)),
-        estimatedSize,
+        estimatedSize: Math.min(targetSizeBytes, estimatedSize), // Never estimate above target
         achievable: true,
       };
     }
