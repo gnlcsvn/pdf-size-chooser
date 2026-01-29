@@ -1,40 +1,87 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import UploadZone from '@/components/UploadZone';
-import SizeSelector from '@/components/SizeSelector';
-import QualitySlider from '@/components/QualitySlider';
+import EstimateDisplay, { CompressionChoice } from '@/components/EstimateDisplay';
+import AnalyzingOverlay from '@/components/AnalyzingOverlay';
+import CompressingOverlay from '@/components/CompressingOverlay';
+import {
+  uploadPdf,
+  getJobStatus,
+  getEstimates,
+  compressWithQuality,
+  compressToSize,
+  downloadPdf,
+  pollJobStatus,
+  EstimateResponse,
+  checkHealth,
+} from '@/lib/api';
 
-interface CompressionResult {
-  originalSize: number;
-  newSize: number;
+type AppStatus =
+  | 'idle'
+  | 'uploading'
+  | 'estimating'
+  | 'ready'
+  | 'compressing'
+  | 'done'
+  | 'failed';
+
+interface Toast {
+  type: 'success' | 'error' | 'warning';
+  message: string;
 }
 
 export default function Home() {
   const [file, setFile] = useState<File | null>(null);
-  const [targetMB, setTargetMB] = useState<number | null>(null);
-  const [quality, setQuality] = useState(75);
-  const [isCompressing, setIsCompressing] = useState(false);
-  const [result, setResult] = useState<CompressionResult | null>(null);
-  const [showToast, setShowToast] = useState(false);
+  const [selectedChoice, setSelectedChoice] = useState<CompressionChoice | null>(null);
+  const [status, setStatus] = useState<AppStatus>('idle');
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [estimates, setEstimates] = useState<EstimateResponse | null>(null);
+  const [compressionResult, setCompressionResult] = useState<{
+    compressedSize: number;
+    quality: number;
+    originalSize: number;
+  } | null>(null);
+  const [toast, setToast] = useState<Toast | null>(null);
+  const [backendConnected, setBackendConnected] = useState<boolean | null>(null);
 
-  const canCompress = file !== null && targetMB !== null;
+  // Refs to track active polling and prevent race conditions
+  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const pollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const activeJobIdRef = useRef<string | null>(null);
 
-  const handleCompress = async () => {
-    if (!canCompress) return;
+  // Cleanup function for polling intervals only
+  const cleanupPolling = useCallback(() => {
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
+    if (pollTimeoutRef.current) {
+      clearTimeout(pollTimeoutRef.current);
+      pollTimeoutRef.current = null;
+    }
+  }, []);
 
-    setIsCompressing(true);
-    setResult(null);
+  // Cancel current job completely
+  const cancelCurrentJob = useCallback(() => {
+    cleanupPolling();
+    activeJobIdRef.current = null;
+  }, [cleanupPolling]);
 
-    // Simulate compression delay
-    await new Promise(resolve => setTimeout(resolve, 1500));
+  // Check backend health on mount
+  useEffect(() => {
+    checkHealth()
+      .then(() => setBackendConnected(true))
+      .catch(() => setBackendConnected(false));
 
-    setIsCompressing(false);
-    setShowToast(true);
+    // Cleanup on unmount
+    return () => cancelCurrentJob();
+  }, [cancelCurrentJob]);
 
-    // Hide toast after 3 seconds
-    setTimeout(() => setShowToast(false), 3000);
-  };
+  const showToast = useCallback((type: Toast['type'], message: string) => {
+    setToast({ type, message });
+    setTimeout(() => setToast(null), 5000);
+  }, []);
 
   const formatFileSize = (bytes: number): string => {
     if (bytes < 1024) return bytes + ' B';
@@ -42,17 +89,246 @@ export default function Home() {
     return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
   };
 
+  const handleFileSelect = useCallback(
+    async (selectedFile: File | null) => {
+      // Cancel any existing job first
+      cancelCurrentJob();
+
+      // Reset state when file changes
+      setFile(selectedFile);
+      setJobId(null);
+      setEstimates(null);
+      setCompressionResult(null);
+      setSelectedChoice(null);
+      setStatus('idle');
+
+      if (!selectedFile) return;
+
+      if (backendConnected === false) {
+        showToast('error', 'Backend not connected. Please try again later.');
+        return;
+      }
+
+      // Start upload
+      setStatus('uploading');
+
+      try {
+        const response = await uploadPdf(selectedFile);
+        const currentJobId = response.jobId;
+
+        // Track this as the active job
+        activeJobIdRef.current = currentJobId;
+        setJobId(currentJobId);
+        setStatus('estimating');
+
+        // Poll for estimates
+        pollIntervalRef.current = setInterval(async () => {
+          // Check if this job is still the active one
+          if (activeJobIdRef.current !== currentJobId) {
+            return;
+          }
+
+          try {
+            const jobStatus = await getJobStatus(currentJobId);
+
+            // Double-check we're still the active job before updating state
+            if (activeJobIdRef.current !== currentJobId) {
+              return;
+            }
+
+            if (jobStatus.status === 'ready' || jobStatus.status === 'done') {
+              // Final check - if job was cancelled, don't update state
+              if (activeJobIdRef.current !== currentJobId) {
+                return;
+              }
+
+              cleanupPolling();
+
+              try {
+                const estimateData = await getEstimates(currentJobId);
+                setEstimates(estimateData);
+                setStatus('ready');
+              } catch (err) {
+                setStatus('failed');
+                showToast('error', 'Failed to get size estimates');
+              }
+            } else if (jobStatus.status === 'failed') {
+              cleanupPolling();
+              setStatus('failed');
+              showToast('error', jobStatus.error || 'Failed to analyze PDF');
+            }
+          } catch (err) {
+            // Continue polling on transient errors
+          }
+        }, 1000);
+
+        // Timeout after 120 seconds
+        pollTimeoutRef.current = setTimeout(() => {
+          if (activeJobIdRef.current === currentJobId) {
+            cleanupPolling();
+            setStatus('failed');
+            showToast('error', 'Analysis took too long. Please try again.');
+          }
+        }, 120000);
+      } catch (err) {
+        cleanupPolling();
+        setStatus('failed');
+        showToast(
+          'error',
+          err instanceof Error ? err.message : 'Upload failed'
+        );
+      }
+    },
+    [backendConnected, showToast, cancelCurrentJob, cleanupPolling]
+  );
+
+  const handleCompress = useCallback(async () => {
+    if (!jobId || !file || !selectedChoice) return;
+
+    setStatus('compressing');
+
+    try {
+      // Start compression based on choice type
+      if (selectedChoice.type === 'target') {
+        await compressToSize(jobId, selectedChoice.targetMB);
+      } else {
+        await compressWithQuality(jobId, selectedChoice.quality);
+      }
+
+      // Poll for completion
+      const finalStatus = await pollJobStatus(
+        jobId,
+        ['done'],
+        {
+          interval: 1000,
+          timeout: 300000,
+        }
+      );
+
+      if (finalStatus.status === 'done' && finalStatus.compressionResult) {
+        setCompressionResult({
+          compressedSize: finalStatus.compressionResult.compressedSize,
+          quality: finalStatus.compressionResult.quality,
+          originalSize: finalStatus.originalSize,
+        });
+        setStatus('done');
+        showToast('success', 'Compression complete!');
+      } else if (finalStatus.status === 'failed') {
+        setStatus('failed');
+        showToast('error', finalStatus.error || 'Compression failed');
+      }
+    } catch (err) {
+      setStatus('failed');
+      showToast(
+        'error',
+        err instanceof Error ? err.message : 'Compression failed'
+      );
+    }
+  }, [jobId, file, selectedChoice, showToast]);
+
+  const handleDownload = useCallback(async () => {
+    if (!jobId || !file) return;
+
+    try {
+      const baseName = file.name.replace(/\.pdf$/i, '');
+      await downloadPdf(jobId, `${baseName}_compressed.pdf`);
+    } catch (err) {
+      showToast(
+        'error',
+        err instanceof Error ? err.message : 'Download failed'
+      );
+    }
+  }, [jobId, file, showToast]);
+
+  const handleReset = useCallback(() => {
+    cancelCurrentJob();
+    setFile(null);
+    setJobId(null);
+    setEstimates(null);
+    setCompressionResult(null);
+    setSelectedChoice(null);
+    setStatus('idle');
+  }, [cancelCurrentJob]);
+
+  const canCompress = selectedChoice !== null && status === 'ready';
+  const isAnalyzing = status === 'uploading' || status === 'estimating';
+
   return (
     <div className="min-h-screen bg-gray-50">
+      {/* Analyzing Overlay */}
+      {isAnalyzing && file && (
+        <AnalyzingOverlay filename={file.name} />
+      )}
+
+      {/* Compressing Overlay */}
+      {status === 'compressing' && file && (
+        <CompressingOverlay filename={file.name} />
+      )}
+
       {/* Toast Notification */}
-      {showToast && (
-        <div className="fixed top-4 right-4 bg-amber-100 border border-amber-300 text-amber-800 px-4 py-3 rounded-lg shadow-lg z-50 animate-fade-in">
+      {toast && (
+        <div
+          className={`fixed top-4 right-4 px-4 py-3 rounded-lg shadow-lg z-50 animate-fade-in ${
+            toast.type === 'success'
+              ? 'bg-green-100 border border-green-300 text-green-800'
+              : toast.type === 'error'
+              ? 'bg-red-100 border border-red-300 text-red-800'
+              : 'bg-amber-100 border border-amber-300 text-amber-800'
+          }`}
+        >
           <div className="flex items-center gap-2">
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-            </svg>
-            <span className="font-medium">Backend not connected</span>
+            {toast.type === 'success' ? (
+              <svg
+                className="w-5 h-5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="2"
+                  d="M5 13l4 4L19 7"
+                />
+              </svg>
+            ) : toast.type === 'error' ? (
+              <svg
+                className="w-5 h-5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="2"
+                  d="M6 18L18 6M6 6l12 12"
+                />
+              </svg>
+            ) : (
+              <svg
+                className="w-5 h-5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="2"
+                  d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                />
+              </svg>
+            )}
+            <span className="font-medium">{toast.message}</span>
           </div>
+        </div>
+      )}
+
+      {/* Backend Status Banner */}
+      {backendConnected === false && (
+        <div className="bg-red-500 text-white text-center py-2 text-sm">
+          Backend not connected. Compression features unavailable.
         </div>
       )}
 
@@ -68,60 +344,158 @@ export default function Home() {
         </header>
 
         {/* Main Card */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 space-y-8">
-          {/* Upload Zone */}
-          <UploadZone file={file} onFileSelect={setFile} />
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 space-y-6">
+          {/* Step 1: Upload */}
+          {status === 'idle' && (
+            <UploadZone
+              file={file}
+              onFileSelect={handleFileSelect}
+              disabled={false}
+            />
+          )}
 
-          {/* Size Selector */}
-          <SizeSelector targetMB={targetMB} onTargetChange={setTargetMB} />
+          {/* Step 2: Choose compression level */}
+          {status === 'ready' && estimates && estimates.estimates.length > 0 && (
+            <>
+              <EstimateDisplay
+                estimates={estimates.estimates}
+                originalSizeMB={estimates.originalSizeMB}
+                pageCount={estimates.pageCount}
+                selectedChoice={selectedChoice}
+                onChoiceSelect={setSelectedChoice}
+              />
 
-          {/* Quality Slider */}
-          <QualitySlider quality={quality} onQualityChange={setQuality} />
+              <button
+                onClick={handleCompress}
+                disabled={!canCompress}
+                className={`
+                  w-full py-3 px-4 rounded-lg font-semibold text-white transition-all
+                  ${canCompress
+                    ? 'bg-blue-600 hover:bg-blue-700 shadow-md hover:shadow-lg'
+                    : 'bg-gray-300 cursor-not-allowed'
+                  }
+                `}
+              >
+                Compress PDF
+              </button>
 
-          {/* Compress Button */}
-          <button
-            onClick={handleCompress}
-            disabled={!canCompress || isCompressing}
-            className={`
-              w-full py-3 px-4 rounded-lg font-semibold text-white transition-all
-              ${canCompress && !isCompressing
-                ? 'bg-blue-600 hover:bg-blue-700 shadow-md hover:shadow-lg'
-                : 'bg-gray-300 cursor-not-allowed'
-              }
-            `}
-          >
-            {isCompressing ? (
-              <span className="flex items-center justify-center gap-2">
-                <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-                Compressing...
-              </span>
-            ) : (
-              'Compress PDF'
-            )}
-          </button>
+              <button
+                onClick={handleReset}
+                className="w-full py-2 text-sm text-gray-500 hover:text-gray-700"
+              >
+                Choose a different file
+              </button>
+            </>
+          )}
 
-          {/* Result Section */}
-          {result && (
-            <div className="border-t pt-6 space-y-4">
-              <h3 className="font-semibold text-gray-900">Compression Complete</h3>
-              <div className="flex justify-between items-center bg-gray-50 rounded-lg p-4">
-                <div>
-                  <p className="text-sm text-gray-500">Original</p>
-                  <p className="font-semibold">{formatFileSize(result.originalSize)}</p>
+          {/* Step 3: Done */}
+          {status === 'done' && compressionResult && (
+            <div className="space-y-6">
+              <div className="text-center">
+                <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-green-100 flex items-center justify-center">
+                  <svg
+                    className="w-8 h-8 text-green-600"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                      d="M5 13l4 4L19 7"
+                    />
+                  </svg>
                 </div>
-                <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                <h3 className="text-xl font-semibold text-gray-900 mb-1">
+                  Compression Complete
+                </h3>
+                <p className="text-gray-500">
+                  Reduced by{' '}
+                  <span className="font-semibold text-green-600">
+                    {(
+                      (1 -
+                        compressionResult.compressedSize /
+                          compressionResult.originalSize) *
+                      100
+                    ).toFixed(0)}%
+                  </span>
+                </p>
+              </div>
+
+              <div className="flex justify-center items-center gap-4 py-4">
+                <div className="text-center">
+                  <p className="text-sm text-gray-500">Original</p>
+                  <p className="text-lg font-semibold text-gray-400 line-through">
+                    {formatFileSize(compressionResult.originalSize)}
+                  </p>
+                </div>
+                <svg
+                  className="w-6 h-6 text-gray-300"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2"
+                    d="M13 7l5 5m0 0l-5 5m5-5H6"
+                  />
                 </svg>
-                <div>
+                <div className="text-center">
                   <p className="text-sm text-gray-500">Compressed</p>
-                  <p className="font-semibold text-green-600">{formatFileSize(result.newSize)}</p>
+                  <p className="text-lg font-semibold text-green-600">
+                    {formatFileSize(compressionResult.compressedSize)}
+                  </p>
                 </div>
               </div>
-              <button className="w-full py-3 px-4 rounded-lg font-semibold text-white bg-green-600 hover:bg-green-700 transition-colors">
+
+              <button
+                onClick={handleDownload}
+                className="w-full py-3 px-4 rounded-lg font-semibold text-white bg-green-600 hover:bg-green-700 transition-colors"
+              >
                 Download Compressed PDF
+              </button>
+
+              <button
+                onClick={handleReset}
+                className="w-full py-2 text-sm text-gray-500 hover:text-gray-700"
+              >
+                Compress another PDF
+              </button>
+            </div>
+          )}
+
+          {/* Error State */}
+          {status === 'failed' && (
+            <div className="py-8 text-center">
+              <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-red-100 flex items-center justify-center">
+                <svg
+                  className="w-8 h-8 text-red-600"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2"
+                    d="M6 18L18 6M6 6l12 12"
+                  />
+                </svg>
+              </div>
+              <h3 className="text-xl font-semibold text-gray-900 mb-1">
+                Something went wrong
+              </h3>
+              <p className="text-gray-500 mb-4">
+                We couldn't process your PDF. Please try again.
+              </p>
+              <button
+                onClick={handleReset}
+                className="px-6 py-2 rounded-lg font-medium text-blue-600 hover:bg-blue-50 transition-colors"
+              >
+                Try again
               </button>
             </div>
           )}

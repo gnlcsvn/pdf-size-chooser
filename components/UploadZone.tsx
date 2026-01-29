@@ -5,15 +5,16 @@ import { useCallback, useState } from 'react';
 interface UploadZoneProps {
   file: File | null;
   onFileSelect: (file: File | null) => void;
+  disabled?: boolean;
 }
 
-export default function UploadZone({ file, onFileSelect }: UploadZoneProps) {
+export default function UploadZone({ file, onFileSelect, disabled = false }: UploadZoneProps) {
   const [isDragging, setIsDragging] = useState(false);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
-    setIsDragging(true);
-  }, []);
+    if (!disabled) setIsDragging(true);
+  }, [disabled]);
 
   const handleDragLeave = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -24,18 +25,22 @@ export default function UploadZone({ file, onFileSelect }: UploadZoneProps) {
     e.preventDefault();
     setIsDragging(false);
 
+    if (disabled) return;
+
     const droppedFile = e.dataTransfer.files[0];
     if (droppedFile && droppedFile.type === 'application/pdf') {
       onFileSelect(droppedFile);
     }
-  }, [onFileSelect]);
+  }, [onFileSelect, disabled]);
 
   const handleFileInput = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    if (disabled) return;
+
     const selectedFile = e.target.files?.[0];
     if (selectedFile && selectedFile.type === 'application/pdf') {
       onFileSelect(selectedFile);
     }
-  }, [onFileSelect]);
+  }, [onFileSelect, disabled]);
 
   const formatFileSize = (bytes: number): string => {
     if (bytes < 1024) return bytes + ' B';
@@ -61,13 +66,15 @@ export default function UploadZone({ file, onFileSelect }: UploadZoneProps) {
             : 'border-gray-300 hover:border-gray-400 bg-gray-50'
           }
           ${file ? 'border-green-500 bg-green-50' : ''}
+          ${disabled ? 'opacity-50 cursor-not-allowed' : ''}
         `}
       >
         <input
           type="file"
           accept=".pdf,application/pdf"
           onChange={handleFileInput}
-          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+          disabled={disabled}
+          className={`absolute inset-0 w-full h-full opacity-0 ${disabled ? 'cursor-not-allowed' : 'cursor-pointer'}`}
         />
 
         {!file ? (
