@@ -16,7 +16,12 @@ import {
   pollJobStatus,
   EstimateResponse,
   checkHealth,
+  executeSplit,
+  downloadSplitPart,
+  downloadAllSplitParts,
+  SplitPart,
 } from '@/lib/api';
+import SplitResult from '@/components/SplitResult';
 
 type AppStatus =
   | 'idle'
@@ -24,7 +29,9 @@ type AppStatus =
   | 'estimating'
   | 'ready'
   | 'compressing'
+  | 'splitting'
   | 'done'
+  | 'split-done'
   | 'failed';
 
 interface Toast {
@@ -48,6 +55,7 @@ export default function Home() {
   const [progressMessage, setProgressMessage] = useState<string | null>(null);
   const [compressionProgress, setCompressionProgress] = useState<number | null>(null);
   const [compressionMessage, setCompressionMessage] = useState<string | null>(null);
+  const [splitResult, setSplitResult] = useState<SplitPart[] | null>(null);
 
   // Refs to track active polling and prevent race conditions
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -266,6 +274,56 @@ export default function Home() {
     }
   }, [jobId, file, showToast]);
 
+  const handleSplit = useCallback(async () => {
+    if (!jobId || !file || !selectedChoice || selectedChoice.type !== 'target') return;
+
+    setStatus('splitting');
+    setCompressionMessage('Splitting PDF...');
+
+    try {
+      const result = await executeSplit(jobId, selectedChoice.targetMB, {
+        compress: true,
+        quality: 75,
+      });
+
+      if (result.success) {
+        setSplitResult(result.parts);
+        setStatus('split-done');
+        showToast('success', `Split into ${result.parts.length} parts!`);
+      } else {
+        setStatus('failed');
+        showToast('error', result.error || 'Split failed');
+      }
+    } catch (err) {
+      setStatus('failed');
+      showToast('error', err instanceof Error ? err.message : 'Split failed');
+    } finally {
+      setCompressionMessage(null);
+    }
+  }, [jobId, file, selectedChoice, showToast]);
+
+  const handleDownloadSplitPart = useCallback(async (partNumber: number) => {
+    if (!jobId || !file) return;
+
+    try {
+      const baseName = file.name.replace(/\.pdf$/i, '');
+      await downloadSplitPart(jobId, partNumber, `${baseName}_part${partNumber}.pdf`);
+    } catch (err) {
+      showToast('error', err instanceof Error ? err.message : 'Download failed');
+    }
+  }, [jobId, file, showToast]);
+
+  const handleDownloadAllSplitParts = useCallback(async () => {
+    if (!jobId || !file) return;
+
+    try {
+      const baseName = file.name.replace(/\.pdf$/i, '');
+      await downloadAllSplitParts(jobId, `${baseName}_split.zip`);
+    } catch (err) {
+      showToast('error', err instanceof Error ? err.message : 'Download failed');
+    }
+  }, [jobId, file, showToast]);
+
   const handleReset = useCallback(() => {
     cancelCurrentJob();
     setFile(null);
@@ -276,6 +334,7 @@ export default function Home() {
     setProgressMessage(null);
     setCompressionProgress(null);
     setCompressionMessage(null);
+    setSplitResult(null);
     setStatus('idle');
   }, [cancelCurrentJob]);
 
@@ -289,8 +348,8 @@ export default function Home() {
         <AnalyzingOverlay filename={file.name} progressMessage={progressMessage || undefined} />
       )}
 
-      {/* Compressing Overlay */}
-      {status === 'compressing' && file && (
+      {/* Compressing/Splitting Overlay */}
+      {(status === 'compressing' || status === 'splitting') && file && (
         <CompressingOverlay
           filename={file.name}
           progress={compressionProgress ?? undefined}
@@ -429,6 +488,7 @@ export default function Home() {
                       setSelectedChoice(null);
                     }
                   }}
+                  onSplit={handleSplit}
                 />
               )}
 
@@ -550,6 +610,17 @@ export default function Home() {
                 Compress another PDF
               </button>
             </div>
+          )}
+
+          {/* Step 3b: Split Done */}
+          {status === 'split-done' && splitResult && file && (
+            <SplitResult
+              parts={splitResult}
+              originalFilename={file.name}
+              onDownloadPart={handleDownloadSplitPart}
+              onDownloadAll={handleDownloadAllSplitParts}
+              onReset={handleReset}
+            />
           )}
 
           {/* Error State */}

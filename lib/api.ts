@@ -275,3 +275,137 @@ export async function checkHealth(): Promise<{
   }
   return response.json();
 }
+
+// ============================================
+// Split PDF API
+// ============================================
+
+export interface SplitPart {
+  partNumber: number;
+  startPage: number;
+  endPage: number;
+  pageCount: number;
+  estimatedSizeMB: number;
+  actualSizeMB?: number;
+}
+
+export interface SplitPlanResponse {
+  feasible: boolean;
+  error?: string;
+  avgPageSizeMB?: number;
+  plan?: {
+    totalPages: number;
+    totalParts: number;
+    targetMB: number;
+    parts: SplitPart[];
+  };
+  warnings?: string[];
+}
+
+export interface SplitExecuteResponse {
+  success: boolean;
+  parts: SplitPart[];
+  error?: string;
+}
+
+/**
+ * Calculate a split plan for a PDF
+ */
+export async function getSplitPlan(
+  jobId: string,
+  targetMB: number,
+  splitAtPage?: number
+): Promise<SplitPlanResponse> {
+  return apiFetch<SplitPlanResponse>(`/api/split/${jobId}/plan`, {
+    method: 'POST',
+    body: JSON.stringify({ targetMB, splitAtPage }),
+  });
+}
+
+/**
+ * Execute a split operation
+ */
+export async function executeSplit(
+  jobId: string,
+  targetMB: number,
+  options: {
+    splitAtPage?: number;
+    compress?: boolean;
+    quality?: number;
+  } = {}
+): Promise<SplitExecuteResponse> {
+  return apiFetch<SplitExecuteResponse>(`/api/split/${jobId}/execute`, {
+    method: 'POST',
+    body: JSON.stringify({
+      targetMB,
+      splitAtPage: options.splitAtPage,
+      compress: options.compress ?? true,
+      quality: options.quality ?? 75,
+    }),
+  });
+}
+
+/**
+ * Download a specific split part
+ */
+export async function downloadSplitPart(
+  jobId: string,
+  partNumber: number,
+  filename: string
+): Promise<void> {
+  const headers: Record<string, string> = {};
+  if (API_KEY) {
+    headers['X-API-Key'] = API_KEY;
+  }
+
+  const response = await fetch(`${API_URL}/api/split/${jobId}/download/${partNumber}`, {
+    headers,
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: 'Download failed' }));
+    throw new Error(error.error || 'Download failed');
+  }
+
+  const blob = await response.blob();
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  window.URL.revokeObjectURL(url);
+}
+
+/**
+ * Download all split parts as a ZIP
+ */
+export async function downloadAllSplitParts(
+  jobId: string,
+  filename: string
+): Promise<void> {
+  const headers: Record<string, string> = {};
+  if (API_KEY) {
+    headers['X-API-Key'] = API_KEY;
+  }
+
+  const response = await fetch(`${API_URL}/api/split/${jobId}/download-all`, {
+    headers,
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: 'Download failed' }));
+    throw new Error(error.error || 'Download failed');
+  }
+
+  const blob = await response.blob();
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  window.URL.revokeObjectURL(url);
+}

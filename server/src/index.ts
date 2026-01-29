@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import { healthRouter } from './routes/health.js';
 import { uploadRouter } from './routes/upload.js';
 import { jobRouter } from './routes/job.js';
+import { splitRouter } from './routes/split.js';
 import { authMiddleware } from './middleware/auth.js';
 import { rateLimitMiddleware } from './middleware/rateLimit.js';
 import { initJobQueue } from './services/jobQueue.js';
@@ -40,6 +41,7 @@ app.use('/api', authMiddleware);
 // API routes
 app.use('/api/upload', uploadRouter);
 app.use('/api/job', jobRouter);
+app.use('/api/split', splitRouter);
 
 // Error handling middleware
 app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
