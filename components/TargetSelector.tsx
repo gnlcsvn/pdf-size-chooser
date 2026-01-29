@@ -116,10 +116,10 @@ export default function TargetSelector({
 
   const isCustomSelected = selectedTarget?.type === 'custom';
 
-  // Check if a target is achievable
-  const isAchievable = (targetMB: number) => {
-    if (!minimumAchievableMB) return true;
-    return targetMB >= minimumAchievableMB;
+  // Check if a target needs splitting (can't be achieved with compression alone)
+  const needsSplit = (targetMB: number) => {
+    if (!minimumAchievableMB) return false;
+    return targetMB < minimumAchievableMB;
   };
 
   return (
@@ -137,28 +137,28 @@ export default function TargetSelector({
           <div className="flex flex-wrap gap-2">
             {category.platforms.map((platform) => {
               const selected = isSelected(platform.id);
-              const achievable = isAchievable(platform.limitMB);
+              const requiresSplit = needsSplit(platform.limitMB);
 
               return (
                 <button
                   key={platform.id}
                   onClick={() => handlePlatformSelect(platform)}
-                  disabled={!achievable}
                   className={`
                     px-3 py-2 rounded-lg text-sm font-medium transition-all
                     ${selected
                       ? 'bg-blue-500 text-white shadow-md'
-                      : achievable
-                        ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                        : 'bg-gray-50 text-gray-300 cursor-not-allowed'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                     }
                   `}
-                  title={!achievable ? `Cannot compress below ${minimumAchievableMB?.toFixed(1)} MB` : undefined}
+                  title={requiresSplit ? `Will need to split into multiple files` : undefined}
                 >
                   {platform.name}
                   <span className={`ml-1 ${selected ? 'text-blue-100' : 'text-gray-400'}`}>
                     {platform.limitMB}MB
                   </span>
+                  {requiresSplit && !selected && (
+                    <span className="ml-1 text-xs text-amber-500">✂️</span>
+                  )}
                 </button>
               );
             })}

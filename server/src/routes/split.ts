@@ -38,31 +38,38 @@ splitRouter.post('/:jobId/plan', async (req, res) => {
 
   const originalSizeMB = job.originalSize / (1024 * 1024);
   const pageCount = job.estimates?.pageCount;
+  const estimates = job.estimates?.estimates;
 
   if (!pageCount) {
     res.status(400).json({ error: 'Job analysis not complete. Please wait for estimation.' });
     return;
   }
 
-  try {
-    // Check if splitting is even feasible
-    const feasibility = await checkSinglePageFeasibility(
-      job.uploadPath,
-      targetMB,
-      originalSizeMB,
-      pageCount
-    );
+  // Get the best compressed size estimate (use quality 75 as default compression level)
+  // This is KEY - we calculate splits based on COMPRESSED size, not original
+  const compressedEstimate = estimates?.find(e => e.quality === 75)
+    || estimates?.find(e => e.quality === 50)
+    || estimates?.[0];
+  const estimatedCompressedSizeMB = compressedEstimate
+    ? compressedEstimate.estimatedSize / (1024 * 1024)
+    : undefined;
 
-    if (!feasibility.feasible) {
+  try {
+    // Check if splitting is even feasible (based on compressed page size)
+    const avgCompressedPageSizeMB = estimatedCompressedSizeMB
+      ? estimatedCompressedSizeMB / pageCount
+      : originalSizeMB / pageCount;
+
+    if (avgCompressedPageSizeMB > targetMB) {
       res.status(200).json({
         feasible: false,
-        error: `Average page size (${feasibility.avgPageSizeMB.toFixed(1)}MB) exceeds target. Consider a larger target size.`,
-        avgPageSizeMB: feasibility.avgPageSizeMB,
+        error: `Even after compression, average page size (~${avgCompressedPageSizeMB.toFixed(1)}MB) exceeds target. Consider a larger target size.`,
+        avgPageSizeMB: avgCompressedPageSizeMB,
       });
       return;
     }
 
-    // Calculate split plan
+    // Calculate split plan based on COMPRESSED size
     let plan: SplitPlan;
 
     if (splitAtPage) {
@@ -75,12 +82,13 @@ splitRouter.post('/:jobId/plan', async (req, res) => {
         pageCount
       );
     } else {
-      // Automatic optimal split
+      // Automatic optimal split - uses compressed estimate!
       plan = await calculateSplitPlan(
         job.uploadPath,
         targetMB,
         originalSizeMB,
-        pageCount
+        pageCount,
+        estimatedCompressedSizeMB // Pass the compressed estimate
       );
     }
 
@@ -133,14 +141,23 @@ splitRouter.post('/:jobId/execute', async (req, res) => {
 
   const originalSizeMB = job.originalSize / (1024 * 1024);
   const pageCount = job.estimates?.pageCount;
+  const estimates = job.estimates?.estimates;
 
   if (!pageCount) {
     res.status(400).json({ error: 'Job analysis not complete' });
     return;
   }
 
+  // Get compressed estimate for the requested quality
+  const compressedEstimate = estimates?.find(e => e.quality === quality)
+    || estimates?.find(e => e.quality === 75)
+    || estimates?.[0];
+  const estimatedCompressedSizeMB = compressedEstimate
+    ? compressedEstimate.estimatedSize / (1024 * 1024)
+    : undefined;
+
   try {
-    // Calculate split plan
+    // Calculate split plan based on compressed size
     let plan: SplitPlan;
 
     if (splitAtPage) {
@@ -156,7 +173,8 @@ splitRouter.post('/:jobId/execute', async (req, res) => {
         job.uploadPath,
         targetMB,
         originalSizeMB,
-        pageCount
+        pageCount,
+        estimatedCompressedSizeMB
       );
     }
 

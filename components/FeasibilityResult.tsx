@@ -34,21 +34,30 @@ export default function FeasibilityResult({
   onChangeTarget,
   onSplit,
 }: FeasibilityResultProps) {
-  const [selectedOption, setSelectedOption] = useState<ImpossibleTargetOption>('different');
-  const [customTargetMB, setCustomTargetMB] = useState<string>(
-    minimumAchievableMB ? Math.ceil(minimumAchievableMB).toString() : ''
-  );
-  const [customTargetError, setCustomTargetError] = useState<string | null>(null);
-
   // Determine feasibility
   const isAchievable = estimatedMB <= targetMB;
   const isClose = isAchievable && estimatedMB >= targetMB * 0.95;
   const isMuchSmaller = isAchievable && estimatedMB <= targetMB * 0.7;
 
-  // Calculate split information
-  const minSize = minimumAchievableMB || estimatedMB;
-  const partsNeeded = Math.ceil(minSize / targetMB);
-  const avgPartSize = originalSizeMB / partsNeeded;
+  // Calculate split information based on COMPRESSED size (estimatedMB), not original
+  // This is the key fix - we use the minimum achievable compressed size
+  const compressedSize = minimumAchievableMB || estimatedMB;
+
+  // Leave 10% buffer below target for safety
+  const effectiveTarget = targetMB * 0.9;
+  const partsNeeded = Math.max(1, Math.ceil(compressedSize / effectiveTarget));
+
+  // Each part will be approximately this size after compression
+  const avgPartSize = compressedSize / partsNeeded;
+
+  // Default to 'split' when it's available and compression alone won't work
+  const [selectedOption, setSelectedOption] = useState<ImpossibleTargetOption>(
+    !isAchievable && onSplit ? 'split' : 'different'
+  );
+  const [customTargetMB, setCustomTargetMB] = useState<string>(
+    minimumAchievableMB ? Math.ceil(minimumAchievableMB).toString() : ''
+  );
+  const [customTargetError, setCustomTargetError] = useState<string | null>(null);
 
   // Validate custom target
   const handleCustomTargetChange = (value: string) => {
@@ -96,10 +105,16 @@ export default function FeasibilityResult({
             </div>
             <div className="flex-1">
               <h3 className="font-semibold text-amber-800">
-                Your PDF can't be compressed below ~{formatSize(minSize)}
+                {partsNeeded > 1
+                  ? `We'll split this into ${partsNeeded} files for ${targetLabel}`
+                  : `Your PDF can't be compressed below ~${formatSize(compressedSize)}`
+                }
               </h3>
               <p className="text-sm text-amber-700 mt-1">
-                Target: {formatSize(targetMB)} • Minimum achievable: {formatSize(minSize)}
+                {partsNeeded > 1
+                  ? `Compresses to ~${formatSize(compressedSize)} total → ${partsNeeded} files of ~${formatSize(avgPartSize)} each`
+                  : `Target: ${formatSize(targetMB)} • Minimum achievable: ${formatSize(compressedSize)}`
+                }
               </p>
             </div>
           </div>
@@ -138,7 +153,10 @@ export default function FeasibilityResult({
                   )}
                 </div>
                 <p className="text-sm text-gray-500 mt-1">
-                  Each part will be ~{formatSize(avgPartSize)} ({pageCount} pages ÷ {partsNeeded} parts)
+                  ~{formatSize(avgPartSize)} each after compression
+                </p>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  {Math.ceil(pageCount / partsNeeded)} pages per file
                 </p>
               </div>
             </div>
@@ -196,7 +214,7 @@ export default function FeasibilityResult({
                       value={customTargetMB}
                       onChange={(e) => handleCustomTargetChange(e.target.value)}
                       onClick={() => setSelectedOption('different')}
-                      placeholder={Math.ceil(minSize).toString()}
+                      placeholder={Math.ceil(compressedSize).toString()}
                       className={`w-24 px-3 py-1.5 rounded border text-sm ${
                         customTargetError
                           ? 'border-red-300 bg-red-50'
@@ -208,7 +226,7 @@ export default function FeasibilityResult({
                     </span>
                   </div>
                   <span className="text-sm text-gray-500">
-                    Suggested: {formatSize(Math.ceil(minSize))}
+                    Suggested: {formatSize(Math.ceil(compressedSize))}
                   </span>
                 </div>
                 {customTargetError && (

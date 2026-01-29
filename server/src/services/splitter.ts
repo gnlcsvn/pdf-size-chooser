@@ -18,6 +18,9 @@ export interface SplitPlan {
   totalParts: number;
   parts: SplitPart[];
   targetMB: number;
+  // New: based on compressed estimates
+  estimatedCompressedSizeMB: number; // Total compressed size estimate
+  compressionRatio: number; // How much the PDF compresses (e.g., 0.25 = 75% reduction)
 }
 
 export interface SplitResult {
@@ -29,29 +32,38 @@ export interface SplitResult {
 /**
  * Calculate how to split a PDF to fit within a target size.
  *
- * Strategy: Distribute pages to balance file sizes, not just page count.
- * We use average bytes per page as an approximation.
+ * IMPORTANT: This calculates based on COMPRESSED size, not original size.
+ * If a 200MB PDF compresses to 50MB, and target is 25MB, we need 2 parts.
+ *
+ * @param inputPath - Path to the PDF
+ * @param targetMB - Target size per part in MB
+ * @param originalSizeMB - Original file size in MB
+ * @param pageCount - Total page count
+ * @param estimatedCompressedSizeMB - Estimated size AFTER compression (from sampler)
  */
 export async function calculateSplitPlan(
   inputPath: string,
   targetMB: number,
   originalSizeMB: number,
-  pageCount: number
+  pageCount: number,
+  estimatedCompressedSizeMB?: number
 ): Promise<SplitPlan> {
-  // Calculate average size per page
-  const avgPageSizeMB = originalSizeMB / pageCount;
+  // Use compressed estimate if available, otherwise fall back to original
+  // This is the KEY fix - we plan based on what the compressed size will be
+  const effectiveSizeMB = estimatedCompressedSizeMB ?? originalSizeMB;
+  const compressionRatio = effectiveSizeMB / originalSizeMB;
 
-  // Leave 10% buffer below target to account for overhead
+  // Leave 10% buffer below target to account for overhead and variance
   const effectiveTargetMB = targetMB * 0.9;
 
-  // Calculate how many pages can fit in each part
-  const pagesPerPart = Math.floor(effectiveTargetMB / avgPageSizeMB);
+  // Calculate how many parts we need based on COMPRESSED size
+  const totalParts = Math.max(1, Math.ceil(effectiveSizeMB / effectiveTargetMB));
 
-  // Ensure at least 1 page per part
-  const safePagesPerPart = Math.max(1, pagesPerPart);
+  // Calculate average compressed size per page
+  const avgCompressedPageSizeMB = effectiveSizeMB / pageCount;
 
-  // Calculate number of parts needed
-  const totalParts = Math.ceil(pageCount / safePagesPerPart);
+  // Calculate pages per part to balance sizes
+  const pagesPerPart = Math.ceil(pageCount / totalParts);
 
   // Distribute pages across parts
   const parts: SplitPart[] = [];
@@ -65,20 +77,20 @@ export async function calculateSplitPlan(
     // For other parts, distribute evenly
     const pagesInThisPart = isLastPart
       ? remainingPages
-      : Math.ceil(remainingPages / (totalParts - i));
+      : Math.min(pagesPerPart, remainingPages);
 
     const startPage = currentPage;
     const endPage = currentPage + pagesInThisPart - 1;
 
-    // Estimate size based on page count ratio
-    const estimatedSizeMB = (pagesInThisPart / pageCount) * originalSizeMB;
+    // Estimate COMPRESSED size for this part
+    const estimatedSizeMB = pagesInThisPart * avgCompressedPageSizeMB;
 
     parts.push({
       partNumber: i + 1,
       startPage,
       endPage,
       pageCount: pagesInThisPart,
-      estimatedSizeMB,
+      estimatedSizeMB: Number(estimatedSizeMB.toFixed(1)),
     });
 
     currentPage += pagesInThisPart;
@@ -89,6 +101,8 @@ export async function calculateSplitPlan(
     totalParts,
     parts,
     targetMB,
+    estimatedCompressedSizeMB: effectiveSizeMB,
+    compressionRatio,
   };
 }
 
@@ -100,7 +114,8 @@ export async function calculateManualSplitPlan(
   splitAtPage: number, // 1-indexed (user-friendly)
   targetMB: number,
   originalSizeMB: number,
-  pageCount: number
+  pageCount: number,
+  estimatedCompressedSizeMB?: number
 ): Promise<SplitPlan> {
   // Convert to 0-indexed
   const splitIndex = splitAtPage - 1;
@@ -110,12 +125,15 @@ export async function calculateManualSplitPlan(
     throw new Error(`Invalid split point. Must be between 2 and ${pageCount}.`);
   }
 
+  const effectiveSizeMB = estimatedCompressedSizeMB ?? originalSizeMB;
+  const compressionRatio = effectiveSizeMB / originalSizeMB;
+
   const part1Pages = splitIndex;
   const part2Pages = pageCount - splitIndex;
 
-  // Estimate sizes proportionally
-  const part1SizeMB = (part1Pages / pageCount) * originalSizeMB;
-  const part2SizeMB = (part2Pages / pageCount) * originalSizeMB;
+  // Estimate COMPRESSED sizes proportionally
+  const part1SizeMB = (part1Pages / pageCount) * effectiveSizeMB;
+  const part2SizeMB = (part2Pages / pageCount) * effectiveSizeMB;
 
   const parts: SplitPart[] = [
     {
@@ -123,14 +141,14 @@ export async function calculateManualSplitPlan(
       startPage: 0,
       endPage: splitIndex - 1,
       pageCount: part1Pages,
-      estimatedSizeMB: part1SizeMB,
+      estimatedSizeMB: Number(part1SizeMB.toFixed(1)),
     },
     {
       partNumber: 2,
       startPage: splitIndex,
       endPage: pageCount - 1,
       pageCount: part2Pages,
-      estimatedSizeMB: part2SizeMB,
+      estimatedSizeMB: Number(part2SizeMB.toFixed(1)),
     },
   ];
 
@@ -139,6 +157,8 @@ export async function calculateManualSplitPlan(
     totalParts: 2,
     parts,
     targetMB,
+    estimatedCompressedSizeMB: effectiveSizeMB,
+    compressionRatio,
   };
 }
 
