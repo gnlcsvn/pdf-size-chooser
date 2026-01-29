@@ -451,6 +451,7 @@ export default function Home() {
           {/* Step 3: Done */}
           {status === 'done' && compressionResult && (
             <div className="space-y-6">
+              {/* Success header with checkmark */}
               <div className="text-center">
                 <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-green-100 flex items-center justify-center">
                   <svg
@@ -467,48 +468,58 @@ export default function Home() {
                     />
                   </svg>
                 </div>
-                <h3 className="text-xl font-semibold text-gray-900 mb-1">
-                  Compression Complete
+
+                {/* Main success message */}
+                <h3 className="text-xl font-semibold text-gray-900 mb-2">
+                  Done. {formatFileSize(compressionResult.compressedSize)}
                 </h3>
-                <p className="text-gray-500">
-                  Reduced by{' '}
-                  <span className="font-semibold text-green-600">
-                    {(
-                      (1 -
-                        compressionResult.compressedSize /
-                          compressionResult.originalSize) *
-                      100
+
+                {/* "Fits in X with room to spare" message */}
+                {selectedChoice?.type === 'target' ? (
+                  <p className="text-green-600 font-medium">
+                    Fits in {selectedChoice.label} with room to spare.
+                  </p>
+                ) : (
+                  <p className="text-green-600 font-medium">
+                    Reduced by {(
+                      (1 - compressionResult.compressedSize / compressionResult.originalSize) * 100
                     ).toFixed(0)}%
-                  </span>
-                </p>
+                  </p>
+                )}
               </div>
 
-              <div className="flex justify-center items-center gap-4 py-4">
-                <div className="text-center">
-                  <p className="text-sm text-gray-500">Original</p>
-                  <p className="text-lg font-semibold text-gray-400 line-through">
-                    {formatFileSize(compressionResult.originalSize)}
-                  </p>
+              {/* Size comparison */}
+              <div className="bg-gray-50 rounded-lg p-4">
+                <div className="flex justify-center items-center gap-4">
+                  <div className="text-center">
+                    <p className="text-xs text-gray-400 uppercase tracking-wide">Original</p>
+                    <p className="text-lg font-semibold text-gray-400 line-through">
+                      {formatFileSize(compressionResult.originalSize)}
+                    </p>
+                  </div>
+                  <svg
+                    className="w-5 h-5 text-green-500"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                      d="M13 7l5 5m0 0l-5 5m5-5H6"
+                    />
+                  </svg>
+                  <div className="text-center">
+                    <p className="text-xs text-gray-400 uppercase tracking-wide">Compressed</p>
+                    <p className="text-lg font-semibold text-green-600">
+                      {formatFileSize(compressionResult.compressedSize)}
+                    </p>
+                  </div>
                 </div>
-                <svg
-                  className="w-6 h-6 text-gray-300"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth="2"
-                    d="M13 7l5 5m0 0l-5 5m5-5H6"
-                  />
-                </svg>
-                <div className="text-center">
-                  <p className="text-sm text-gray-500">Compressed</p>
-                  <p className="text-lg font-semibold text-green-600">
-                    {formatFileSize(compressionResult.compressedSize)}
-                  </p>
-                </div>
+                <p className="text-center text-sm text-gray-500 mt-2">
+                  {((1 - compressionResult.compressedSize / compressionResult.originalSize) * 100).toFixed(0)}% smaller
+                </p>
               </div>
 
               <button
